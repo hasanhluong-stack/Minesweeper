@@ -1,4 +1,4 @@
--- V4.1.1
+-- V5.2
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -143,7 +143,7 @@ local function createButton(name, text, x, y, width, height, textColor)
     return btn
 end
 
-local toggleBtn  = createButton("ToggleBtn", "START", 8, 26, 88, 26, Color3.fromRGB(0, 255, 0))
+local toggleBtn  = createButton("ToggleBtn", "ESP: OFF", 8, 26, 88, 26, Color3.fromRGB(255, 120, 120))
 local autoFlagBtn = createButton("AutoFlagBtn", "AUTO FLAG: OFF", 104, 26, 88, 26, Color3.fromRGB(255, 120, 120))
 local antiLagBtn = createButton("AntiLagBtn", "ANTI-LAG: OFF", 8, 56, 88, 26, Color3.fromRGB(255, 255, 255))
 local endlessBtn = createButton("EndlessBtn", "ENDLESS: OFF", 104, 56, 88, 26, Color3.fromRGB(255, 170, 0))
@@ -198,23 +198,26 @@ local SET = {
     flagDelay = 0.02,  -- giây giữa mỗi lần đặt / tháo một cờ (0.1 = 10 cờ mỗi giây)
     openDelay = 0.05,  -- giây giữa mỗi lô ô được mở
     openBatch = 30,    -- số ô mở trong mỗi lô (tốc độ mở ≈ openBatch / openDelay ô mỗi giây)
+    antiStatic = false, -- Anti-Static: vô hiệu hóa mọi thứ trong PlayerGui.Gui
     noStep = false,    -- Không giẫm mìn: tắt CanTouch của các ô script biết là mìn
     open = false,      -- đang ở trang Settings?
     page = nil,
 }
 local DEFAULTS = { flagDelay = SET.flagDelay, openDelay = SET.openDelay, openBatch = SET.openBatch }
+local requestEngine -- shared solver lifecycle; assigned after solver functions are defined
 
 local collapsed = false
 
 local function applyPages()
     body.Visible = (not collapsed) and not SET.open
     if SET.page then SET.page.Visible = (not collapsed) and SET.open end
+    -- trang Settings cao hơn trang chính một chút
+    mainFrame.Size = UDim2.new(0, PANEL_W, 0, collapsed and TITLE_H or (TITLE_H + (SET.open and 198 or BODY_H)))
 end
 
 local function setCollapsed(c)
     collapsed = c
     applyPages()
-    mainFrame.Size = UDim2.new(0, PANEL_W, 0, c and TITLE_H or (TITLE_H + BODY_H))
     collapseBtn.Text = c and "+" or "-"
     titleLabel.Text = c and status.Text or "Minesweeper"
 end
@@ -325,7 +328,7 @@ do
 
     makeLabel("Settings", 8, 2, 184, 18, Color3.fromRGB(255, 220, 100), 14).Font = Enum.Font.GothamBold
 
-    local info = makeLabel("", 8, 124, 184, 16, Color3.fromRGB(170, 220, 255), 12)
+    local info = makeLabel("", 8, 150, 184, 16, Color3.fromRGB(170, 220, 255), 12)
     local boxes = {}
 
     local function fmt(v)
@@ -402,11 +405,43 @@ do
         SET.noStep = not SET.noStep
         refreshNoStep()
         if not SET.noStep and SET.restore then SET.restore() end
+        if requestEngine and not requestEngine() then
+            SET.noStep = false
+            if SET.restore then SET.restore() end
+            refreshNoStep()
+        end
+    end)
+
+    -- Anti-Static: bật = vô hiệu hóa mọi thứ trong game.Players.LocalPlayer.PlayerGui.Gui; tắt = hoạt động lại
+    local antiBtn = Instance.new("TextButton")
+    antiBtn.Parent = page
+    antiBtn.Position = UDim2.new(0, 8, 0, 124)
+    antiBtn.Size = UDim2.new(0, 184, 0, 22)
+    antiBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    antiBtn.Font = Enum.Font.GothamBold
+    antiBtn.TextSize = 13
+    antiBtn.AutoButtonColor = true
+    antiBtn.BorderSizePixel = 0
+
+    local function refreshAnti()
+        if SET.antiStatic then
+            antiBtn.Text = "ANTI-STATIC: ON"
+            antiBtn.TextColor3 = Color3.fromRGB(0, 255, 0)
+        else
+            antiBtn.Text = "ANTI-STATIC: OFF"
+            antiBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
+        end
+    end
+    refreshAnti()
+
+    antiBtn.MouseButton1Click:Connect(function()
+        if SET.setAntiStatic then SET.setAntiStatic(not SET.antiStatic) end
+        refreshAnti()
     end)
 
     local reset = Instance.new("TextButton")
     reset.Parent = page
-    reset.Position = UDim2.new(0, 8, 0, 144)
+    reset.Position = UDim2.new(0, 8, 0, 170)
     reset.Size = UDim2.new(0, 184, 0, 22)
     reset.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     reset.TextColor3 = Color3.fromRGB(255, 170, 0)
@@ -515,7 +550,8 @@ end
 
 local lastConflictTime = -10           -- thời điểm solver phát hiện mâu thuẫn gần nhất
 
-local isScanning = false
+local isScanning = false -- shared analysis engine, not the ESP switch
+local isEspOn = false
 local isAutoFlagging = false
 local isAutoOpening = false
 local isAntiLagOn = false
@@ -931,7 +967,7 @@ end
 local function startHereFacingLoop()
     if hereRenderConn then return end
     hereRenderConn = RunService.RenderStepped:Connect(function()
-        if not isScanning or not herePillarPart or not herePillarPart.Parent then
+        if not isScanning or not isEspOn or not herePillarPart or not herePillarPart.Parent then
             stopHereFacingLoop()
             return
         end
@@ -970,7 +1006,7 @@ local function findNearestUnrevealedTile(charPos)
 end
 
 local function updateHerePillar(charPos, foundMinesCount)
-    if not isScanning or isEndlessOn or foundMinesCount < MINE_MARKER_THRESHOLD then
+    if not isScanning or not isEspOn or isEndlessOn or foundMinesCount < MINE_MARKER_THRESHOLD then
         clearHerePillar()
         return
     end
@@ -1071,6 +1107,7 @@ local function withinVisualRange(part, charPos)
 end
 
 local function createHighlight(part, color, name)
+    if not isEspOn then return end
     if not part or not part:IsA("BasePart") or not part.Parent then return end
 
     -- đã có đúng ESP này rồi -> thoát sớm (tránh gọi getCharPos hàng trăm lần mỗi vòng)
@@ -2251,6 +2288,125 @@ function SET.syncNoStep(now)
     end
 end
 
+-- ANTI-STATIC: khi bật, vô hiệu hóa mọi thứ trong game.Players.LocalPlayer.PlayerGui.Gui
+--   * ScreenGui/BillboardGui/SurfaceGui -> Enabled = false;  GuiObject -> Visible = false
+--   * Script/LocalScript -> Enabled = false;  Sound -> Playing = false, Volume = 0
+--   * ParticleEmitter, Beam, Trail, Light, PostEffect, UIStroke, UIGradient... -> Enabled = false
+-- Giá trị gốc được lưu lại; tắt Anti-Static thì khôi phục để mọi thứ hoạt động lại như cũ.
+-- Khi đang bật, đối tượng mới sinh ra trong Gui cũng bị vô hiệu hóa ngay, và trạng thái "tắt" được giữ lại
+-- (quét lại mỗi 0.5s phòng khi game bật lại).
+SET.stat = {
+    orig = setmetatable({}, { __mode = "k" }),
+    conns = {},
+    gen = 0,
+    classes = { "ParticleEmitter", "Beam", "Trail", "Light", "PostEffect", "Highlight",
+                "UIStroke", "UIGradient", "Fire", "Smoke", "Sparkles" },
+}
+
+function SET.staticRoot()
+    local pg = player:FindFirstChild("PlayerGui")
+    return pg and pg:FindFirstChild("Gui") or nil
+end
+
+function SET.staticDisable(inst)
+    if inst == screenGui or inst:IsDescendantOf(screenGui) then return end -- không đụng vào menu của chính script
+
+    local st = SET.stat
+    local function setProp(name, value)
+        local ok, cur = pcall(function() return inst[name] end)
+        if not ok then return end
+        local rec = st.orig[inst]
+        if not rec then
+            rec = {}
+            st.orig[inst] = rec
+        end
+        if rec[name] == nil then rec[name] = cur end
+        if cur ~= value then pcall(function() inst[name] = value end) end
+    end
+
+    if inst:IsA("LayerCollector") then
+        setProp("Enabled", false)
+    elseif inst:IsA("GuiObject") then
+        setProp("Visible", false)
+    elseif inst:IsA("BaseScript") then
+        setProp("Enabled", false)
+    elseif inst:IsA("Sound") then
+        setProp("Playing", false)
+        setProp("Volume", 0)
+    else
+        for _, cls in ipairs(st.classes) do
+            if inst:IsA(cls) then
+                setProp("Enabled", false)
+                break
+            end
+        end
+    end
+end
+
+function SET.staticApply()
+    local root = SET.staticRoot()
+    if not root then return end
+    SET.staticDisable(root)
+    for _, d in ipairs(root:GetDescendants()) do
+        SET.staticDisable(d)
+    end
+end
+
+function SET.staticRestore()
+    local st = SET.stat
+    for inst, rec in pairs(st.orig) do
+        if inst.Parent then
+            for name, value in pairs(rec) do
+                pcall(function() inst[name] = value end)
+            end
+        end
+        st.orig[inst] = nil
+    end
+end
+
+function SET.setAntiStatic(on)
+    local st = SET.stat
+    SET.antiStatic = on
+    st.gen = st.gen + 1
+    local myGen = st.gen
+
+    for _, c in ipairs(st.conns) do c:Disconnect() end
+    st.conns = {}
+
+    if not on then
+        SET.staticRestore()
+        return
+    end
+
+    local function hookRoot(root)
+        if st.gen ~= myGen then return end
+        SET.staticApply()
+        table.insert(st.conns, root.DescendantAdded:Connect(function(d)
+            if SET.antiStatic and st.gen == myGen then
+                task.defer(function() SET.staticDisable(d) end)
+            end
+        end))
+    end
+
+    local root = SET.staticRoot()
+    if root then hookRoot(root) end
+
+    -- Gui bị game tạo lại -> hook lại
+    local pg = player:FindFirstChild("PlayerGui")
+    if pg then
+        table.insert(st.conns, pg.ChildAdded:Connect(function(child)
+            if child.Name == "Gui" then hookRoot(child) end
+        end))
+    end
+
+    task.spawn(function()
+        while SET.antiStatic and st.gen == myGen do
+            SET.staticApply()
+            task.wait(0.5)
+        end
+    end)
+end
+
 local lastFlagRefresh = 0
 local lastStatusText = ""
 
@@ -2444,11 +2600,13 @@ local function solverTick()
 
     SET.syncNoStep(now)
 
-    if solved or ((isAntiLagOn or isEndlessOn) and now - EL.lastSync >= 0.3) then
+    if isEspOn and (solved or ((isAntiLagOn or isEndlessOn) and now - EL.lastSync >= 0.3)) then
         EL.lastSync = now
         syncVisualsRange(charPos)
     end
-    updateHerePillar(charPos, countKnownMines())
+    if isEspOn then
+        updateHerePillar(charPos, countKnownMines())
+    end
 
     local autoTag = (isAutoFlagging or isAutoOpening)
         and ("+" .. (isAutoFlagging and "F" or "") .. (isAutoOpening and "O" or "")) or ""
@@ -2582,62 +2740,106 @@ local function stopAutoActions()
     lastStatusText = ""
 end
 
-toggleBtn.MouseButton1Click:Connect(function()
-    if isScanning then
-        isScanning = false
-        solverGeneration = solverGeneration + 1
-        stopAutoActions()
+local function startSharedEngine()
+    local tileRoot = getTileRoot()
+    if not tileRoot then
+        warn("[Minesweeper Script] Cannot find workspace.Flag.Parts")
+        status.Text = "Status: Flag.Parts Not Found"
+        status.TextColor3 = Color3.fromRGB(255, 170, 0)
+        return false
+    end
 
-        toggleBtn.Text = "START"
-        toggleBtn.TextColor3 = Color3.fromRGB(0, 255, 0)
-        status.Text = "Status: Offline"
-        status.TextColor3 = Color3.fromRGB(255, 0, 0)
+    isScanning = true
+    status.Text = "Status: Starting analysis..."
+    status.TextColor3 = Color3.fromRGB(0, 255, 0)
+    lastStatusText = ""
 
-        for _, conn in pairs(connections) do conn:Disconnect() end
-        connections = {}
-        SET.restore()
-        hardResetKnowledge()
-        cachedParts = {}; cachedSet = {}; neighborMap = {}
-        addedQueue = {}; removedSinceFlush = 0
+    hardResetKnowledge()
+    if isEndlessOn then
+        EL.reset(true)
     else
-        local tileRoot = getTileRoot()
-        if not tileRoot then
-            warn("[Minesweeper Script] Không tìm thấy workspace.Flag.Parts")
-            status.Text = "Status: Flag.Parts Not Found"
-            status.TextColor3 = Color3.fromRGB(255, 170, 0)
+        rescanBoard()
+    end
+    refreshFlagCache()
+
+    table.insert(connections, tileRoot.DescendantAdded:Connect(onDescendantAdded))
+    table.insert(connections, tileRoot.DescendantRemoving:Connect(onDescendantRemoving))
+    startSolverLoop()
+    return true
+end
+
+local function stopSharedEngine()
+    if not isScanning then return end
+    isScanning = false
+    solverGeneration = solverGeneration + 1
+
+    for _, conn in pairs(connections) do conn:Disconnect() end
+    connections = {}
+    if SET.restore then SET.restore() end
+    hardResetKnowledge()
+    cachedParts = {}
+    cachedSet = {}
+    neighborMap = {}
+    addedQueue = {}
+    removedSinceFlush = 0
+    clearAllVisuals()
+    clearHerePillar()
+    status.Text = "Status: Idle"
+    status.TextColor3 = Color3.fromRGB(255, 0, 0)
+end
+
+-- One shared analysis loop serves ESP, Auto Flag, Auto Open and No-Step.
+-- Anti-Static remains independent and does not start the solver.
+requestEngine = function()
+    local needed = isEspOn or isAutoFlagging or isAutoOpening or SET.noStep
+    if needed then
+        if not isScanning then
+            return startSharedEngine()
+        end
+        return true
+    end
+
+    stopSharedEngine()
+    return true
+end
+
+toggleBtn.MouseButton1Click:Connect(function()
+    isEspOn = not isEspOn
+    if isEspOn then
+        if not requestEngine() then
+            isEspOn = false
+            toggleBtn.Text = "ESP: OFF"
+            toggleBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
             return
         end
-
-        isScanning = true
-        toggleBtn.Text = "STOP"
-        toggleBtn.TextColor3 = Color3.fromRGB(255, 0, 0)
-        status.Text = "Status: Scanning..."
-        status.TextColor3 = Color3.fromRGB(0, 255, 0)
-        lastStatusText = ""
-
-        hardResetKnowledge()
-        if isEndlessOn then
-            EL.reset(true) -- cửa sổ được dựng ở vòng solver đầu tiên (không chặn giao diện)
-        else
-            rescanBoard()
-        end
-        refreshFlagCache()
-
-        table.insert(connections, tileRoot.DescendantAdded:Connect(onDescendantAdded))
-        table.insert(connections, tileRoot.DescendantRemoving:Connect(onDescendantRemoving))
-        startSolverLoop()
+        toggleBtn.Text = "ESP: ON"
+        toggleBtn.TextColor3 = Color3.fromRGB(0, 255, 0)
+        -- If another feature already runs the shared solver, display its latest results immediately.
+        if isScanning then syncVisualsRange(getCharPos()) end
+    else
+        toggleBtn.Text = "ESP: OFF"
+        toggleBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
+        clearAllVisuals()
+        clearHerePillar()
+        requestEngine() -- keep the solver alive only if another feature still needs it
     end
 end)
 
 -- AUTO FLAG: tháo cờ sai (cờ nằm trên ô đã chắc chắn an toàn) + đặt cờ lên mìn đã chắc chắn
 autoFlagBtn.MouseButton1Click:Connect(function()
-    if not isScanning then return end
-
     isAutoFlagging = not isAutoFlagging
     lastStatusText = ""
 
     if not isAutoFlagging then
         autoFlagGeneration = autoFlagGeneration + 1
+        autoFlagBtn.Text = "AUTO FLAG: OFF"
+        autoFlagBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
+        requestEngine()
+        return
+    end
+
+    if not requestEngine() then
+        isAutoFlagging = false
         autoFlagBtn.Text = "AUTO FLAG: OFF"
         autoFlagBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
         return
@@ -2730,13 +2932,19 @@ end)
 
 -- AUTO OPEN: tự mở các ô đã chắc chắn an toàn (theo lô, gần nhất trước, bỏ qua ô đang có cờ)
 autoOpenBtn.MouseButton1Click:Connect(function()
-    if not isScanning then return end
-
     isAutoOpening = not isAutoOpening
     lastStatusText = ""
 
     if not isAutoOpening then
         autoOpenGeneration = autoOpenGeneration + 1
+        autoOpenBtn.Text = "AUTO OPEN: OFF"
+        autoOpenBtn.TextColor3 = Color3.fromRGB(0, 255, 255)
+        requestEngine()
+        return
+    end
+
+    if not requestEngine() then
+        isAutoOpening = false
         autoOpenBtn.Text = "AUTO OPEN: OFF"
         autoOpenBtn.TextColor3 = Color3.fromRGB(0, 255, 255)
         return
@@ -2818,7 +3026,7 @@ antiLagBtn.MouseButton1Click:Connect(function()
     lastSig = nil -- buộc giải lại với phạm vi mới
     endlessLastCenter = nil -- Endless: đổi profile (Full <-> Light) nên quét lại cửa sổ
     EL.version = EL.version + 1
-    if isScanning then
+    if isScanning and isEspOn then
         local charPos = getCharPos()
         syncVisualsRange(charPos)
         updateHerePillar(charPos, countKnownMines())
@@ -2848,7 +3056,12 @@ end)
 
 local function destroyAll()
     pcall(SET.restore)
+    pcall(SET.setAntiStatic, false)
+    isEspOn = false
     isScanning = false
+    isAutoFlagging = false
+    isAutoOpening = false
+    SET.noStep = false
     isAntiLagOn = false
     solverGeneration = solverGeneration + 1
     stopAutoActions()
