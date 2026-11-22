@@ -1,4 +1,4 @@
--- V5.3
+-- V5.4
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -199,6 +199,7 @@ local SET = {
     flagBatch = 1,     -- số cờ đặt / tháo trong mỗi lô (tốc độ ≈ flagBatch / flagDelay cờ mỗi giây; 1 = mỗi flagDelay một cờ)
     openDelay = 0.05,  -- giây giữa mỗi lô ô được mở
     openBatch = 30,    -- số ô mở trong mỗi lô (tốc độ mở ≈ openBatch / openDelay ô mỗi giây)
+    markLeftover = false, -- Đánh dấu ô còn sót: bật thanh Here (độc lập với ESP)
     antiStatic = false, -- Anti-Static: vô hiệu hóa mọi thứ trong PlayerGui.Gui
     noStep = false,    -- Không giẫm mìn: tắt CanTouch của các ô script biết là mìn
     open = false,      -- đang ở trang Settings?
@@ -213,7 +214,7 @@ local function applyPages()
     body.Visible = (not collapsed) and not SET.open
     if SET.page then SET.page.Visible = (not collapsed) and SET.open end
     -- trang Settings cao hơn trang chính một chút
-    mainFrame.Size = UDim2.new(0, PANEL_W, 0, collapsed and TITLE_H or (TITLE_H + (SET.open and 224 or BODY_H)))
+    mainFrame.Size = UDim2.new(0, PANEL_W, 0, collapsed and TITLE_H or (TITLE_H + (SET.open and 248 or BODY_H)))
 end
 
 local function setCollapsed(c)
@@ -329,7 +330,7 @@ do
 
     makeLabel("Settings", 8, 2, 184, 18, Color3.fromRGB(255, 220, 100), 14).Font = Enum.Font.GothamBold
 
-    local info = makeLabel("", 8, 178, 184, 16, Color3.fromRGB(170, 220, 255), 12)
+    local info = makeLabel("", 8, 202, 184, 16, Color3.fromRGB(170, 220, 255), 12)
     local boxes = {}
 
     local function fmt(v)
@@ -442,9 +443,40 @@ do
         refreshAnti()
     end)
 
+    -- Đánh dấu ô còn sót: bật / tắt thanh Here, riêng với ESP
+    local markBtn = Instance.new("TextButton")
+    markBtn.Parent = page
+    markBtn.Position = UDim2.new(0, 8, 0, 176)
+    markBtn.Size = UDim2.new(0, 184, 0, 22)
+    markBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    markBtn.Font = Enum.Font.GothamBold
+    markBtn.TextSize = 13
+    markBtn.AutoButtonColor = true
+    markBtn.BorderSizePixel = 0
+
+    local function refreshMark()
+        if SET.markLeftover then
+            markBtn.Text = "MARK LEFTOVER: ON"
+            markBtn.TextColor3 = Color3.fromRGB(0, 255, 0)
+        else
+            markBtn.Text = "MARK LEFTOVER: OFF"
+            markBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
+        end
+    end
+    refreshMark()
+
+    markBtn.MouseButton1Click:Connect(function()
+        SET.markLeftover = not SET.markLeftover
+        -- bật: khởi động bộ giải dùng chung nếu cần; tắt: dừng nó nếu không còn tính năng nào cần
+        if requestEngine and not requestEngine() then
+            SET.markLeftover = false
+        end
+        refreshMark()
+    end)
+
     local reset = Instance.new("TextButton")
     reset.Parent = page
-    reset.Position = UDim2.new(0, 8, 0, 198)
+    reset.Position = UDim2.new(0, 8, 0, 222)
     reset.Size = UDim2.new(0, 184, 0, 22)
     reset.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     reset.TextColor3 = Color3.fromRGB(255, 170, 0)
@@ -588,11 +620,17 @@ local addedQueue = {}
 local removedSinceFlush = 0
 local flushScheduled = false
 
-local herePillarPart = nil
-local hereBillboardGui = nil
-local hereTargetPart = nil
-local hereHeight = 8
-local hereRenderConn = nil
+-- Thanh "Here": hẹp + dài, hiện trên ô chưa mở gần nhất, ô an toàn gần nhất và ô đoán (vàng)
+local HERE = {
+    marks = {},        -- [kind] = { part, bb, label, target }   kind: "unrev" | "safe" | "guess"
+    conn = nil,
+    height = 12,       -- chiều dài (dọc) của thanh, studs (trước đây 8)
+    widthFactor = 0.2, -- bề ngang = cạnh ô * hệ số này (trước đây 0.35 -> hẹp hơn)
+    minWidth = 0.3,
+    thickness = 0.06,
+    lastScan = 0,
+    nearestUnrev = nil,
+}
 
 local fiftyFiftyAlertActive = false
 local activeAlertLabel = nil
@@ -942,92 +980,78 @@ local function triggerTileTouch(targetTile)
 end
 
 -------------------------------------------------------------------------------
--- "HERE" 3D FLAT RAY + BILLBOARD (>= MINE_MARKER_THRESHOLD)
+-- "HERE": thanh dựng đứng + nhãn trên ô chưa mở gần nhất, ô an toàn gần nhất, ô đoán;
+-- tất cả chỉ hiện khi số mìn script đã biết >= MINE_MARKER_THRESHOLD.
+-- Không bị giới hạn bởi Anti-Lag: không lọc theo phạm vi giải / phạm vi ESP.
 -------------------------------------------------------------------------------
 
-local function stopHereFacingLoop()
-    if hereRenderConn then
-        hereRenderConn:Disconnect()
-        hereRenderConn = nil
+local function hereStop()
+    if HERE.conn then
+        HERE.conn:Disconnect()
+        HERE.conn = nil
     end
 end
 
-local function applyHereFacingCFrame()
-    if not herePillarPart or not herePillarPart.Parent or not hereTargetPart or not hereTargetPart.Parent then
-        return
+local function hereRemove(kind)
+    local m = HERE.marks[kind]
+    if m then
+        pcall(function() m.bb:Destroy() end)
+        pcall(function() m.part:Destroy() end)
+        HERE.marks[kind] = nil
     end
-    local baseTopY = hereTargetPart.Position.Y + (hereTargetPart.Size.Y * 0.5)
-    local centerPos = Vector3.new(hereTargetPart.Position.X, baseTopY + (hereHeight * 0.5), hereTargetPart.Position.Z)
-
-    local cam = Workspace.CurrentCamera
-    local lookTarget = cam and Vector3.new(cam.CFrame.Position.X, centerPos.Y, cam.CFrame.Position.Z)
-    if lookTarget and (lookTarget - centerPos).Magnitude > 0.01 then
-        herePillarPart.CFrame = CFrame.lookAt(centerPos, lookTarget)
-    else
-        herePillarPart.CFrame = CFrame.new(centerPos)
-    end
-end
-
-local function startHereFacingLoop()
-    if hereRenderConn then return end
-    hereRenderConn = RunService.RenderStepped:Connect(function()
-        if not isScanning or not isEspOn or not herePillarPart or not herePillarPart.Parent then
-            stopHereFacingLoop()
-            return
-        end
-        applyHereFacingCFrame()
-    end)
 end
 
 local function clearHerePillar()
-    stopHereFacingLoop()
-    hereTargetPart = nil
-    if hereBillboardGui then
-        pcall(function() hereBillboardGui:Destroy() end)
-        hereBillboardGui = nil
+    hereStop()
+    for kind in pairs(HERE.marks) do
+        hereRemove(kind)
     end
-    if herePillarPart then
-        pcall(function() herePillarPart:Destroy() end)
-        herePillarPart = nil
-    end
+    HERE.nearestUnrev = nil
 end
 
-local function findNearestUnrevealedTile(charPos)
-    local nearestPart, shortestDist = nil, math.huge
-    for _, part in ipairs(lastUnknown) do
-        if part.Parent and isUnrevealed(part)
-            and not knownMines[part] and not knownSafe[part]
-            and isWithinActiveRange(part, charPos, 0)
-            and not hasFlag(part) then
-            local dist = charPos and (part.Position - charPos).Magnitude or 0
-            if dist < shortestDist then
-                shortestDist = dist
-                nearestPart = part
+-- Cập nhật vị trí + hướng của mọi thanh (thanh luôn đứng thẳng, mặt phẳng hướng về camera)
+local function hereFace()
+    local cam = Workspace.CurrentCamera
+    for _, m in pairs(HERE.marks) do
+        local t = m.target
+        if m.part.Parent and t and t.Parent then
+            local topY = t.Position.Y + (t.Size.Y * 0.5)
+            local center = Vector3.new(t.Position.X, topY + (HERE.height * 0.5), t.Position.Z)
+            local look = cam and Vector3.new(cam.CFrame.Position.X, center.Y, cam.CFrame.Position.Z)
+            if look and (look - center).Magnitude > 0.01 then
+                m.part.CFrame = CFrame.lookAt(center, look)
+            else
+                m.part.CFrame = CFrame.new(center)
             end
         end
     end
-    return nearestPart
 end
 
-local function updateHerePillar(charPos, foundMinesCount)
-    if not isScanning or not isEspOn or isEndlessOn or foundMinesCount < MINE_MARKER_THRESHOLD then
-        clearHerePillar()
-        return
-    end
+local function hereStart()
+    if HERE.conn then return end
+    HERE.conn = RunService.RenderStepped:Connect(function()
+        if not isScanning or not SET.markLeftover or next(HERE.marks) == nil then
+            hereStop()
+            return
+        end
+        hereFace()
+    end)
+end
 
-    local target = findNearestUnrevealedTile(charPos)
+-- Tạo / cập nhật thanh Here của một loại ô (target = nil thì gỡ)
+local function hereSet(kind, target, color)
     if not target then
-        clearHerePillar()
+        hereRemove(kind)
         return
     end
-    hereTargetPart = target
 
-    local flatWidth = math.max(0.45, math.min(target.Size.X, target.Size.Z) * 0.35)
-    local flatThickness = 0.06
+    local width = math.max(HERE.minWidth, math.min(target.Size.X, target.Size.Z) * HERE.widthFactor)
+    local size = Vector3.new(width, HERE.height, HERE.thickness)
 
-    if not herePillarPart or not herePillarPart.Parent then
+    local m = HERE.marks[kind]
+    if not m or not m.part.Parent then
         local p = Instance.new("Part")
-        p.Name = "HereFlatRay"
+        p.Name = "HereFlatRay_" .. kind
         p.Anchored = true
         p.CanCollide = false
         p.CanTouch = false
@@ -1035,25 +1059,15 @@ local function updateHerePillar(charPos, foundMinesCount)
         p.CastShadow = false
         p.Massless = true
         p.Material = Enum.Material.Neon
-        p.Color = Color3.fromRGB(255, 255, 255)
         p.Transparency = 0.25
-        p.Size = Vector3.new(flatWidth, hereHeight, flatThickness)
+        p.Size = size
         p.Parent = visualsFolder
-        herePillarPart = p
-    else
-        herePillarPart.Size = Vector3.new(flatWidth, hereHeight, flatThickness)
-    end
 
-    applyHereFacingCFrame()
-    startHereFacingLoop()
-
-    if not hereBillboardGui or not hereBillboardGui.Parent then
         local bb = Instance.new("BillboardGui")
         bb.Name = "HereBillboard"
-        bb.Adornee = herePillarPart
+        bb.Adornee = p
         bb.AlwaysOnTop = true
         bb.Size = UDim2.new(0, 76, 0, 26)
-        bb.StudsOffset = Vector3.new(0, (hereHeight * 0.5) + 1.2, 0)
         bb.Parent = guiParent
 
         local lbl = Instance.new("TextLabel")
@@ -1061,15 +1075,86 @@ local function updateHerePillar(charPos, foundMinesCount)
         lbl.Size = UDim2.new(1, 0, 1, 0)
         lbl.BackgroundTransparency = 1
         lbl.Text = "Here"
-        lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
         lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         lbl.TextStrokeTransparency = 0.35
         lbl.TextScaled = true
         lbl.Font = Enum.Font.GothamBold
         lbl.Parent = bb
-        hereBillboardGui = bb
+
+        m = { part = p, bb = bb, label = lbl }
+        HERE.marks[kind] = m
+    end
+
+    m.target = target
+    m.part.Size = size
+    m.part.Color = color
+    m.label.TextColor3 = color
+    m.bb.StudsOffset = Vector3.new(0, (HERE.height * 0.5) + 1.2, 0)
+end
+
+-- Ô chưa mở gần nhất trên TOÀN bàn (không giới hạn phạm vi), quét thưa mỗi 0.6s
+local function hereScanUnrevealed(charPos)
+    local best, bestD = nil, math.huge
+    for _, part in ipairs(cachedParts) do
+        if part.Parent and isUnrevealed(part)
+            and not knownMines[part] and not knownSafe[part] then
+            local d = charPos and (part.Position - charPos).Magnitude or 0
+            if d < bestD and not hasFlag(part) then
+                best, bestD = part, d
+            end
+        end
+    end
+    return best
+end
+
+local function updateHerePillar(charPos, foundMinesCount)
+    -- Thanh Here (trắng / xanh / vàng) chỉ hiện khi số mìn script đã biết >= MINE_MARKER_THRESHOLD (90)
+    if not isScanning or not SET.markLeftover or foundMinesCount < MINE_MARKER_THRESHOLD then
+        clearHerePillar()
+        return
+    end
+
+    -- 1) Ô an toàn gần nhất (xanh) - không lọc theo phạm vi
+    local safeT, safeD = nil, math.huge
+    for part, ok in pairs(knownSafe) do
+        if ok and part.Parent and isUnrevealed(part) then
+            local d = charPos and (part.Position - charPos).Magnitude or 0
+            if d < safeD then safeT, safeD = part, d end
+        end
+    end
+    hereSet("safe", safeT, Color3.fromRGB(0, 255, 0))
+
+    -- 2) Ô đoán (vàng)
+    local g = currentBestGuess
+    if g and g.Parent and isUnrevealed(g) and not knownMines[g] and not knownSafe[g] then
+        hereSet("guess", g, Color3.fromRGB(255, 255, 0))
     else
-        hereBillboardGui.Adornee = herePillarPart
+        hereRemove("guess")
+    end
+
+    -- 3) Ô chưa mở gần nhất (trắng): chỉ ở chế độ thường (Endless không có tổng số mìn cố định)
+    if isEndlessOn then
+        HERE.nearestUnrev = nil
+        hereRemove("unrev")
+    else
+        local cur = HERE.nearestUnrev
+        local now = os.clock()
+        if cur and not (cur.Parent and isUnrevealed(cur) and not knownMines[cur] and not knownSafe[cur]) then
+            cur = nil
+        end
+        if not cur or now - HERE.lastScan >= 0.6 then
+            HERE.lastScan = now
+            cur = hereScanUnrevealed(charPos)
+        end
+        HERE.nearestUnrev = cur
+        hereSet("unrev", cur, Color3.fromRGB(255, 255, 255))
+    end
+
+    if next(HERE.marks) ~= nil then
+        hereFace()
+        hereStart()
+    else
+        hereStop()
     end
 end
 
@@ -2608,8 +2693,8 @@ local function solverTick()
         EL.lastSync = now
         syncVisualsRange(charPos)
     end
-    if isEspOn then
-        updateHerePillar(charPos, countKnownMines())
+    if SET.markLeftover or next(HERE.marks) ~= nil then
+        updateHerePillar(charPos, countKnownMines()) -- khi tắt thì hàm này gỡ các thanh còn lại
     end
 
     local autoTag = (isAutoFlagging or isAutoOpening)
@@ -2795,7 +2880,7 @@ end
 -- One shared analysis loop serves ESP, Auto Flag, Auto Open and No-Step.
 -- Anti-Static remains independent and does not start the solver.
 requestEngine = function()
-    local needed = isEspOn or isAutoFlagging or isAutoOpening or SET.noStep
+    local needed = isEspOn or isAutoFlagging or isAutoOpening or SET.noStep or SET.markLeftover
     if needed then
         if not isScanning then
             return startSharedEngine()
@@ -2824,7 +2909,6 @@ toggleBtn.MouseButton1Click:Connect(function()
         toggleBtn.Text = "ESP: OFF"
         toggleBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
         clearAllVisuals()
-        clearHerePillar()
         requestEngine() -- keep the solver alive only if another feature still needs it
     end
 end)
@@ -3040,10 +3124,10 @@ antiLagBtn.MouseButton1Click:Connect(function()
     lastSig = nil -- buộc giải lại với phạm vi mới
     endlessLastCenter = nil -- Endless: đổi profile (Full <-> Light) nên quét lại cửa sổ
     EL.version = EL.version + 1
-    if isScanning and isEspOn then
+    if isScanning and (isEspOn or SET.markLeftover) then
         local charPos = getCharPos()
-        syncVisualsRange(charPos)
-        updateHerePillar(charPos, countKnownMines())
+        if isEspOn then syncVisualsRange(charPos) end
+        if SET.markLeftover then updateHerePillar(charPos, countKnownMines()) end
     end
 end)
 
@@ -3076,6 +3160,7 @@ local function destroyAll()
     isAutoFlagging = false
     isAutoOpening = false
     SET.noStep = false
+    SET.markLeftover = false
     isAntiLagOn = false
     solverGeneration = solverGeneration + 1
     stopAutoActions()
