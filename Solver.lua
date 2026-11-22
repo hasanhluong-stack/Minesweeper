@@ -81,7 +81,7 @@ titleLabel.Parent = titleBar
 titleLabel.BackgroundTransparency = 1
 titleLabel.Position = UDim2.new(0, 8, 0, 0)
 titleLabel.Size = UDim2.new(1, -96, 1, 0)
-titleLabel.Text = "Minesweeper"
+titleLabel.Text = "Minesweeper-[REMAKE]"
 titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.TextSize = 13
 titleLabel.Font = Enum.Font.GothamBold
@@ -199,7 +199,7 @@ local SET = {
     flagBatch = 1,     -- số cờ đặt / tháo trong mỗi lô (tốc độ ≈ flagBatch / flagDelay cờ mỗi giây; 1 = mỗi flagDelay một cờ)
     openDelay = 0.05,  -- giây giữa mỗi lô ô được mở
     openBatch = 30,    -- số ô mở trong mỗi lô (tốc độ mở ≈ openBatch / openDelay ô mỗi giây)
-    markLeftover = true, -- Đánh dấu ô còn sót: bật thanh Here (độc lập với ESP)
+    markLeftover = false, -- Đánh dấu ô còn sót: bật thanh Here (độc lập với ESP)
     antiStatic = false, -- Anti-Static: vô hiệu hóa mọi thứ trong PlayerGui.Gui
     noStep = false,    -- Không giẫm mìn: tắt CanTouch của các ô script biết là mìn
     open = false,      -- đang ở trang Settings?
