@@ -1,5 +1,4 @@
--- Debug
--- V3.1.1
+-- V4.1.1
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -81,7 +80,7 @@ local titleLabel = Instance.new("TextLabel")
 titleLabel.Parent = titleBar
 titleLabel.BackgroundTransparency = 1
 titleLabel.Position = UDim2.new(0, 8, 0, 0)
-titleLabel.Size = UDim2.new(1, -66, 1, 0)
+titleLabel.Size = UDim2.new(1, -96, 1, 0)
 titleLabel.Text = "Minesweeper"
 titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.TextSize = 13
@@ -104,7 +103,10 @@ local function createTitleButton(text, xOffset)
     return b
 end
 
-local collapseBtn = createTitleButton("-", -58)
+local collapseBtn = createTitleButton("-", -86)
+local gearBtn = createTitleButton("⚙", -58)
+gearBtn.Font = Enum.Font.SourceSansBold
+gearBtn.TextSize = 18
 local closeBtn = createTitleButton("X", -30)
 
 local body = Instance.new("Frame")
@@ -191,11 +193,27 @@ local iconCorner = Instance.new("UICorner")
 iconCorner.CornerRadius = UDim.new(0, 19)
 iconCorner.Parent = iconBtn
 
+-- Cài đặt có thể chỉnh trong trang Settings (bánh răng). Giá trị mặc định = giá trị đang dùng trong script.
+local SET = {
+    flagDelay = 0.02,  -- giây giữa mỗi lần đặt / tháo một cờ (0.1 = 10 cờ mỗi giây)
+    openDelay = 0.05,  -- giây giữa mỗi lô ô được mở
+    openBatch = 30,    -- số ô mở trong mỗi lô (tốc độ mở ≈ openBatch / openDelay ô mỗi giây)
+    noStep = false,    -- Không giẫm mìn: tắt CanTouch của các ô script biết là mìn
+    open = false,      -- đang ở trang Settings?
+    page = nil,
+}
+local DEFAULTS = { flagDelay = SET.flagDelay, openDelay = SET.openDelay, openBatch = SET.openBatch }
+
 local collapsed = false
+
+local function applyPages()
+    body.Visible = (not collapsed) and not SET.open
+    if SET.page then SET.page.Visible = (not collapsed) and SET.open end
+end
 
 local function setCollapsed(c)
     collapsed = c
-    body.Visible = not c
+    applyPages()
     mainFrame.Size = UDim2.new(0, PANEL_W, 0, c and TITLE_H or (TITLE_H + BODY_H))
     collapseBtn.Text = c and "+" or "-"
     titleLabel.Text = c and status.Text or "Minesweeper"
@@ -278,6 +296,142 @@ makeDraggable(titleBar, mainFrame)
 makeDraggable(body, mainFrame)
 makeDraggable(iconBtn, iconBtn, function() setPanelVisible(not mainFrame.Visible) end)
 
+do
+    local page = Instance.new("Frame")
+    page.Name = "SettingsPage"
+    page.Parent = mainFrame
+    page.BackgroundTransparency = 1
+    page.Position = UDim2.new(0, 0, 0, TITLE_H)
+    page.Size = UDim2.new(1, 0, 1, -TITLE_H)
+    page.BorderSizePixel = 0
+    page.Active = true
+    page.Visible = false
+    SET.page = page
+
+    local function makeLabel(text, x, y, w, h, color, size)
+        local l = Instance.new("TextLabel")
+        l.Parent = page
+        l.BackgroundTransparency = 1
+        l.Position = UDim2.new(0, x, 0, y)
+        l.Size = UDim2.new(0, w, 0, h)
+        l.Text = text
+        l.TextColor3 = color or Color3.fromRGB(255, 255, 255)
+        l.Font = Enum.Font.GothamMedium
+        l.TextSize = size or 13
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.BorderSizePixel = 0
+        return l
+    end
+
+    makeLabel("Settings", 8, 2, 184, 18, Color3.fromRGB(255, 220, 100), 14).Font = Enum.Font.GothamBold
+
+    local info = makeLabel("", 8, 124, 184, 16, Color3.fromRGB(170, 220, 255), 12)
+    local boxes = {}
+
+    local function fmt(v)
+        return tostring(math.floor(v * 1000 + 0.5) / 1000)
+    end
+
+    local function refreshInfo()
+        local flagsPerSec = 1 / SET.flagDelay
+        local opensPerSec = SET.openBatch / SET.openDelay
+        info.Text = string.format("~%.0f flags/s | ~%.0f opens/s", flagsPerSec, opensPerSec)
+    end
+
+    local function refreshBoxes()
+        boxes.flagDelay.Text = fmt(SET.flagDelay)
+        boxes.openDelay.Text = fmt(SET.openDelay)
+        boxes.openBatch.Text = tostring(SET.openBatch)
+        refreshInfo()
+    end
+
+    -- Một dòng: nhãn + ô nhập. Nhập sai thì trả về giá trị cũ; nhập ngoài khoảng thì bị kẹp lại.
+    local function makeRow(key, label, y, lo, hi, isInt)
+        makeLabel(label, 8, y, 112, 22)
+        local box = Instance.new("TextBox")
+        box.Parent = page
+        box.Position = UDim2.new(0, 124, 0, y)
+        box.Size = UDim2.new(0, 68, 0, 22)
+        box.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        box.TextColor3 = Color3.fromRGB(255, 255, 255)
+        box.Font = Enum.Font.GothamMedium
+        box.TextSize = 13
+        box.ClearTextOnFocus = false
+        box.BorderSizePixel = 0
+        box.Text = ""
+        boxes[key] = box
+
+        box.FocusLost:Connect(function()
+            local v = tonumber(box.Text)
+            if v then
+                v = math.clamp(v, lo, hi)
+                if isInt then v = math.floor(v + 0.5) end
+                SET[key] = v
+            end
+            refreshBoxes()
+        end)
+    end
+
+    makeRow("flagDelay", "Flag delay (s)", 24, 0.01, 5, false)
+    makeRow("openDelay", "Open delay (s)", 50, 0.01, 5, false)
+    makeRow("openBatch", "Open batch", 76, 1, 60, true)
+
+    -- Không giẫm mìn: khi bật, mọi ô script đánh dấu / biết là mìn sẽ bị tắt CanTouch
+    local noStepBtn = Instance.new("TextButton")
+    noStepBtn.Parent = page
+    noStepBtn.Position = UDim2.new(0, 8, 0, 100)
+    noStepBtn.Size = UDim2.new(0, 184, 0, 22)
+    noStepBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    noStepBtn.Font = Enum.Font.GothamBold
+    noStepBtn.TextSize = 13
+    noStepBtn.AutoButtonColor = true
+    noStepBtn.BorderSizePixel = 0
+
+    local function refreshNoStep()
+        if SET.noStep then
+            noStepBtn.Text = "NO-STEP MINES: ON"
+            noStepBtn.TextColor3 = Color3.fromRGB(0, 255, 0)
+        else
+            noStepBtn.Text = "NO-STEP MINES: OFF"
+            noStepBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
+        end
+    end
+    refreshNoStep()
+
+    noStepBtn.MouseButton1Click:Connect(function()
+        SET.noStep = not SET.noStep
+        refreshNoStep()
+        if not SET.noStep and SET.restore then SET.restore() end
+    end)
+
+    local reset = Instance.new("TextButton")
+    reset.Parent = page
+    reset.Position = UDim2.new(0, 8, 0, 144)
+    reset.Size = UDim2.new(0, 184, 0, 22)
+    reset.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    reset.TextColor3 = Color3.fromRGB(255, 170, 0)
+    reset.Font = Enum.Font.GothamBold
+    reset.TextSize = 13
+    reset.Text = "Reset defaults"
+    reset.AutoButtonColor = true
+    reset.BorderSizePixel = 0
+    reset.MouseButton1Click:Connect(function()
+        SET.flagDelay = DEFAULTS.flagDelay
+        SET.openDelay = DEFAULTS.openDelay
+        SET.openBatch = DEFAULTS.openBatch
+        refreshBoxes()
+    end)
+
+    refreshBoxes()
+    makeDraggable(page, mainFrame)
+end
+
+gearBtn.MouseButton1Click:Connect(function()
+    if collapsed then setCollapsed(false) end
+    SET.open = not SET.open
+    gearBtn.TextColor3 = SET.open and Color3.fromRGB(255, 220, 100) or Color3.fromRGB(255, 255, 255)
+    applyPages()
+end)
 collapseBtn.MouseButton1Click:Connect(function() setCollapsed(not collapsed) end)
 closeBtn.MouseButton1Click:Connect(function() setPanelVisible(false) end)
 
@@ -2050,6 +2204,53 @@ end
 -- MAIN SOLVER LOOP
 -------------------------------------------------------------------------------
 
+-- Không giẫm mìn: tắt CanTouch trên các ô script biết là mìn; khôi phục giá trị gốc khi bỏ đánh dấu
+-- (có độ trễ 1.5s để không nhấp nháy lúc script reset mềm), khi tắt tính năng, STOP hoặc Destroy.
+SET.touchOff = setmetatable({}, { __mode = "k" })
+
+function SET.restore()
+    for part, rec in pairs(SET.touchOff) do
+        if part.Parent then
+            pcall(function() part.CanTouch = rec.orig end)
+        end
+        SET.touchOff[part] = nil
+    end
+end
+
+function SET.syncNoStep(now)
+    local off = SET.touchOff
+    if not SET.noStep then
+        if next(off) then SET.restore() end
+        return
+    end
+
+    for part, isMine in pairs(knownMines) do
+        if isMine and part.Parent then
+            local rec = off[part]
+            if not rec then
+                off[part] = { orig = part.CanTouch, lost = nil }
+                part.CanTouch = false
+            else
+                rec.lost = nil
+                if part.CanTouch then part.CanTouch = false end -- game bật lại thì tắt tiếp
+            end
+        end
+    end
+
+    for part, rec in pairs(off) do
+        if not part.Parent then
+            off[part] = nil
+        elseif not knownMines[part] then
+            if not rec.lost then
+                rec.lost = now
+            elseif now - rec.lost > 1.5 then
+                pcall(function() part.CanTouch = rec.orig end)
+                off[part] = nil
+            end
+        end
+    end
+end
+
 local lastFlagRefresh = 0
 local lastStatusText = ""
 
@@ -2241,6 +2442,8 @@ local function solverTick()
         end
     end
 
+    SET.syncNoStep(now)
+
     if solved or ((isAntiLagOn or isEndlessOn) and now - EL.lastSync >= 0.3) then
         EL.lastSync = now
         syncVisualsRange(charPos)
@@ -2392,6 +2595,7 @@ toggleBtn.MouseButton1Click:Connect(function()
 
         for _, conn in pairs(connections) do conn:Disconnect() end
         connections = {}
+        SET.restore()
         hardResetKnowledge()
         cachedParts = {}; cachedSet = {}; neighborMap = {}
         addedQueue = {}; removedSinceFlush = 0
@@ -2478,7 +2682,7 @@ autoFlagBtn.MouseButton1Click:Connect(function()
                         clickTile(part)
                         stamp(part)
                         didWork = true
-                        task.wait(0.02)
+                        task.wait(SET.flagDelay)
                     end
                 end
 
@@ -2500,7 +2704,7 @@ autoFlagBtn.MouseButton1Click:Connect(function()
                         clickTile(part)
                         stamp(part)
                         didWork = true
-                        task.wait(0.02)
+                        task.wait(SET.flagDelay)
                     end
                 end
 
@@ -2568,7 +2772,7 @@ autoOpenBtn.MouseButton1Click:Connect(function()
                 end
 
                 sortByProximity(toReveal, charPos)
-                for i = 1, math.min(#toReveal, BATCH_SIZE) do
+                for i = 1, math.min(#toReveal, SET.openBatch) do
                     local part = toReveal[i]
                     stamp(part)
                     task.spawn(function()
@@ -2581,7 +2785,7 @@ autoOpenBtn.MouseButton1Click:Connect(function()
                         end
                     end)
                 end
-                task.wait(0.05)
+                task.wait(SET.openDelay)
             end)
 
             if not ok and err ~= lastErr then
@@ -2643,6 +2847,7 @@ endlessBtn.MouseButton1Click:Connect(function()
 end)
 
 local function destroyAll()
+    pcall(SET.restore)
     isScanning = false
     isAntiLagOn = false
     solverGeneration = solverGeneration + 1
