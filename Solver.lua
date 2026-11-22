@@ -1,4 +1,4 @@
--- V5.2
+-- V5.3
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -195,7 +195,8 @@ iconCorner.Parent = iconBtn
 
 -- Cài đặt có thể chỉnh trong trang Settings (bánh răng). Giá trị mặc định = giá trị đang dùng trong script.
 local SET = {
-    flagDelay = 0.02,  -- giây giữa mỗi lần đặt / tháo một cờ (0.1 = 10 cờ mỗi giây)
+    flagDelay = 0.02,  -- giây giữa mỗi lô cờ được đặt / tháo
+    flagBatch = 1,     -- số cờ đặt / tháo trong mỗi lô (tốc độ ≈ flagBatch / flagDelay cờ mỗi giây; 1 = mỗi flagDelay một cờ)
     openDelay = 0.05,  -- giây giữa mỗi lô ô được mở
     openBatch = 30,    -- số ô mở trong mỗi lô (tốc độ mở ≈ openBatch / openDelay ô mỗi giây)
     antiStatic = false, -- Anti-Static: vô hiệu hóa mọi thứ trong PlayerGui.Gui
@@ -203,7 +204,7 @@ local SET = {
     open = false,      -- đang ở trang Settings?
     page = nil,
 }
-local DEFAULTS = { flagDelay = SET.flagDelay, openDelay = SET.openDelay, openBatch = SET.openBatch }
+local DEFAULTS = { flagDelay = SET.flagDelay, flagBatch = SET.flagBatch, openDelay = SET.openDelay, openBatch = SET.openBatch }
 local requestEngine -- shared solver lifecycle; assigned after solver functions are defined
 
 local collapsed = false
@@ -212,7 +213,7 @@ local function applyPages()
     body.Visible = (not collapsed) and not SET.open
     if SET.page then SET.page.Visible = (not collapsed) and SET.open end
     -- trang Settings cao hơn trang chính một chút
-    mainFrame.Size = UDim2.new(0, PANEL_W, 0, collapsed and TITLE_H or (TITLE_H + (SET.open and 198 or BODY_H)))
+    mainFrame.Size = UDim2.new(0, PANEL_W, 0, collapsed and TITLE_H or (TITLE_H + (SET.open and 224 or BODY_H)))
 end
 
 local function setCollapsed(c)
@@ -328,7 +329,7 @@ do
 
     makeLabel("Settings", 8, 2, 184, 18, Color3.fromRGB(255, 220, 100), 14).Font = Enum.Font.GothamBold
 
-    local info = makeLabel("", 8, 150, 184, 16, Color3.fromRGB(170, 220, 255), 12)
+    local info = makeLabel("", 8, 178, 184, 16, Color3.fromRGB(170, 220, 255), 12)
     local boxes = {}
 
     local function fmt(v)
@@ -336,13 +337,14 @@ do
     end
 
     local function refreshInfo()
-        local flagsPerSec = 1 / SET.flagDelay
+        local flagsPerSec = SET.flagBatch / SET.flagDelay
         local opensPerSec = SET.openBatch / SET.openDelay
         info.Text = string.format("~%.0f flags/s | ~%.0f opens/s", flagsPerSec, opensPerSec)
     end
 
     local function refreshBoxes()
         boxes.flagDelay.Text = fmt(SET.flagDelay)
+        boxes.flagBatch.Text = tostring(SET.flagBatch)
         boxes.openDelay.Text = fmt(SET.openDelay)
         boxes.openBatch.Text = tostring(SET.openBatch)
         refreshInfo()
@@ -376,13 +378,14 @@ do
     end
 
     makeRow("flagDelay", "Flag delay (s)", 24, 0.01, 5, false)
-    makeRow("openDelay", "Open delay (s)", 50, 0.01, 5, false)
-    makeRow("openBatch", "Open batch", 76, 1, 60, true)
+    makeRow("flagBatch", "Flag batch", 50, 1, 60, true)
+    makeRow("openDelay", "Open delay (s)", 76, 0.01, 5, false)
+    makeRow("openBatch", "Open batch", 102, 1, 60, true)
 
     -- Không giẫm mìn: khi bật, mọi ô script đánh dấu / biết là mìn sẽ bị tắt CanTouch
     local noStepBtn = Instance.new("TextButton")
     noStepBtn.Parent = page
-    noStepBtn.Position = UDim2.new(0, 8, 0, 100)
+    noStepBtn.Position = UDim2.new(0, 8, 0, 128)
     noStepBtn.Size = UDim2.new(0, 184, 0, 22)
     noStepBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     noStepBtn.Font = Enum.Font.GothamBold
@@ -415,7 +418,7 @@ do
     -- Anti-Static: bật = vô hiệu hóa mọi thứ trong game.Players.LocalPlayer.PlayerGui.Gui; tắt = hoạt động lại
     local antiBtn = Instance.new("TextButton")
     antiBtn.Parent = page
-    antiBtn.Position = UDim2.new(0, 8, 0, 124)
+    antiBtn.Position = UDim2.new(0, 8, 0, 152)
     antiBtn.Size = UDim2.new(0, 184, 0, 22)
     antiBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     antiBtn.Font = Enum.Font.GothamBold
@@ -441,7 +444,7 @@ do
 
     local reset = Instance.new("TextButton")
     reset.Parent = page
-    reset.Position = UDim2.new(0, 8, 0, 170)
+    reset.Position = UDim2.new(0, 8, 0, 198)
     reset.Size = UDim2.new(0, 184, 0, 22)
     reset.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     reset.TextColor3 = Color3.fromRGB(255, 170, 0)
@@ -452,6 +455,7 @@ do
     reset.BorderSizePixel = 0
     reset.MouseButton1Click:Connect(function()
         SET.flagDelay = DEFAULTS.flagDelay
+        SET.flagBatch = DEFAULTS.flagBatch
         SET.openDelay = DEFAULTS.openDelay
         SET.openBatch = DEFAULTS.openBatch
         refreshBoxes()
@@ -2865,6 +2869,7 @@ autoFlagBtn.MouseButton1Click:Connect(function()
                     refreshFlagCache()
                 end
                 local didWork = false
+                local sinceWait = 0 -- số cờ đã thao tác trong lô hiện tại
 
                 -- 1. Tháo cờ sai (gần nhất trước)
                 local misplaced = {}
@@ -2884,7 +2889,11 @@ autoFlagBtn.MouseButton1Click:Connect(function()
                         clickTile(part)
                         stamp(part)
                         didWork = true
-                        task.wait(SET.flagDelay)
+                        sinceWait = sinceWait + 1
+                        if sinceWait >= SET.flagBatch then
+                            sinceWait = 0
+                            task.wait(SET.flagDelay)
+                        end
                     end
                 end
 
@@ -2906,10 +2915,15 @@ autoFlagBtn.MouseButton1Click:Connect(function()
                         clickTile(part)
                         stamp(part)
                         didWork = true
-                        task.wait(SET.flagDelay)
+                        sinceWait = sinceWait + 1
+                        if sinceWait >= SET.flagBatch then
+                            sinceWait = 0
+                            task.wait(SET.flagDelay)
+                        end
                     end
                 end
 
+                if sinceWait > 0 then task.wait(SET.flagDelay) end -- lô cuối chưa đủ số cờ vẫn phải nghỉ
                 if not didWork then task.wait(0.1) end
             end)
 
