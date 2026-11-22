@@ -1,4 +1,4 @@
--- V5.4
+-- V6.4
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -81,7 +81,7 @@ titleLabel.Parent = titleBar
 titleLabel.BackgroundTransparency = 1
 titleLabel.Position = UDim2.new(0, 8, 0, 0)
 titleLabel.Size = UDim2.new(1, -96, 1, 0)
-titleLabel.Text = "Minesweeper-[REMAKE]"
+titleLabel.Text = "Minesweeper"
 titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.TextSize = 13
 titleLabel.Font = Enum.Font.GothamBold
@@ -199,13 +199,134 @@ local SET = {
     flagBatch = 1,     -- số cờ đặt / tháo trong mỗi lô (tốc độ ≈ flagBatch / flagDelay cờ mỗi giây; 1 = mỗi flagDelay một cờ)
     openDelay = 0.05,  -- giây giữa mỗi lô ô được mở
     openBatch = 30,    -- số ô mở trong mỗi lô (tốc độ mở ≈ openBatch / openDelay ô mỗi giây)
-    markLeftover = false, -- Đánh dấu ô còn sót: bật thanh Here (độc lập với ESP)
+    actRange = 60,        -- phạm vi thao tác của Auto Flag / Auto Open (studs)
+    totalMines = 100,     -- tổng số mìn của bàn (dùng cho suy luận theo tổng số mìn + hiển thị)
+    hereThreshold = 90,   -- thanh Here chỉ hiện khi số mìn script đã biết >= giá trị này
+    markLeftover = true,  -- Đánh dấu ô còn sót: bật thanh Here (độc lập với ESP) - mặc định BẬT
     antiStatic = false, -- Anti-Static: vô hiệu hóa mọi thứ trong PlayerGui.Gui
     noStep = false,    -- Không giẫm mìn: tắt CanTouch của các ô script biết là mìn
     open = false,      -- đang ở trang Settings?
     page = nil,
 }
-local DEFAULTS = { flagDelay = SET.flagDelay, flagBatch = SET.flagBatch, openDelay = SET.openDelay, openBatch = SET.openBatch }
+-- Khoảng giá trị cho phép của các ô nhập: { min, max, là số nguyên }
+SET.limits = {
+    flagDelay = { 0.01, 5, false },
+    flagBatch = { 1, 60, true },
+    openDelay = { 0.01, 5, false },
+    openBatch = { 1, 60, true },
+    actRange = { 10, 300, false },
+    totalMines = { 1, 99999, true },
+    hereThreshold = { 0, 99999, true },
+}
+SET.boolKeys = { "noStep", "antiStatic", "markLeftover" } -- các công tắc được lưu (không lưu ESP / Auto Flag / Auto Open)
+
+local DEFAULTS = {}
+for key in pairs(SET.limits) do DEFAULTS[key] = SET[key] end
+
+-- LƯU / NẠP cài đặt (JSON). File: <Workspace của Delta>/MinesweeperS/Save
+--   = /storage/emulated/0/Delta/Workspace/MinesweeperS/Save
+SET.saveDir = "MinesweeperS"
+SET.savePath = "MinesweeperS/Save"
+SET.saveAbs = "/storage/emulated/0/Delta/Workspace/MinesweeperS/Save"
+SET.saveMsg = ""
+SET.saveQueued = false
+
+function SET.setMsg(text)
+    SET.saveMsg = text
+    if SET.msgLabel then SET.msgLabel.Text = text end
+end
+
+function SET.collect()
+    local t = {}
+    for key in pairs(SET.limits) do t[key] = SET[key] end
+    for _, key in ipairs(SET.boolKeys) do t[key] = SET[key] == true end
+    return t
+end
+
+function SET.save()
+    if type(writefile) ~= "function" then
+        SET.setMsg("Save: writefile unavailable")
+        return false
+    end
+
+    local okEnc, data = pcall(function()
+        return game:GetService("HttpService"):JSONEncode(SET.collect())
+    end)
+    if not okEnc then
+        SET.setMsg("Save: encode failed")
+        return false
+    end
+
+    -- tạo thư mục MinesweeperS nếu chưa có
+    pcall(function()
+        if type(isfolder) == "function" and type(makefolder) == "function" and not isfolder(SET.saveDir) then
+            makefolder(SET.saveDir)
+        end
+    end)
+
+    local ok = pcall(writefile, SET.savePath, data)
+    if not ok then
+        ok = pcall(writefile, SET.saveAbs, data) -- phòng khi executor nhận đường dẫn tuyệt đối
+    end
+    SET.setMsg(ok and "Saved: MinesweeperS/Save" or "Save: write failed")
+    return ok
+end
+
+-- Lưu tự động sau khi đổi cài đặt (gộp nhiều thay đổi liên tiếp thành một lần ghi)
+function SET.queueSave()
+    if SET.saveQueued then return end
+    SET.saveQueued = true
+    task.delay(0.6, function()
+        SET.saveQueued = false
+        SET.save()
+    end)
+end
+
+function SET.load()
+    if type(readfile) ~= "function" then
+        SET.setMsg("Save: readfile unavailable")
+        return false
+    end
+
+    local function try(path)
+        local ok, res = pcall(function()
+            if type(isfile) == "function" and not isfile(path) then return nil end
+            return readfile(path)
+        end)
+        if ok and type(res) == "string" and #res > 0 then return res end
+        return nil
+    end
+
+    local raw = try(SET.savePath) or try(SET.saveAbs)
+    if not raw then
+        SET.setMsg("No save file yet (defaults)")
+        return false
+    end
+
+    local ok, data = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(raw)
+    end)
+    if not ok or type(data) ~= "table" then
+        SET.setMsg("Save file unreadable (defaults)")
+        return false
+    end
+
+    for key, lim in pairs(SET.limits) do
+        local v = tonumber(data[key])
+        if v then
+            v = math.clamp(v, lim[1], lim[2])
+            if lim[3] then v = math.floor(v + 0.5) end
+            SET[key] = v
+        end
+    end
+    for _, key in ipairs(SET.boolKeys) do
+        if type(data[key]) == "boolean" then SET[key] = data[key] end
+    end
+
+    SET.setMsg("Loaded: MinesweeperS/Save")
+    if SET.refreshUI then SET.refreshUI() end
+    return true
+end
 local requestEngine -- shared solver lifecycle; assigned after solver functions are defined
 
 local collapsed = false
@@ -214,7 +335,7 @@ local function applyPages()
     body.Visible = (not collapsed) and not SET.open
     if SET.page then SET.page.Visible = (not collapsed) and SET.open end
     -- trang Settings cao hơn trang chính một chút
-    mainFrame.Size = UDim2.new(0, PANEL_W, 0, collapsed and TITLE_H or (TITLE_H + (SET.open and 248 or BODY_H)))
+    mainFrame.Size = UDim2.new(0, PANEL_W, 0, collapsed and TITLE_H or (TITLE_H + (SET.open and 230 or BODY_H)))
 end
 
 local function setCollapsed(c)
@@ -302,7 +423,7 @@ makeDraggable(body, mainFrame)
 makeDraggable(iconBtn, iconBtn, function() setPanelVisible(not mainFrame.Visible) end)
 
 do
-    local page = Instance.new("Frame")
+    local page = Instance.new("ScrollingFrame")
     page.Name = "SettingsPage"
     page.Parent = mainFrame
     page.BackgroundTransparency = 1
@@ -311,6 +432,9 @@ do
     page.BorderSizePixel = 0
     page.Active = true
     page.Visible = false
+    page.ScrollingDirection = Enum.ScrollingDirection.Y
+    page.ScrollBarThickness = 4
+    page.CanvasSize = UDim2.new(0, 0, 0, 360)
     SET.page = page
 
     local function makeLabel(text, x, y, w, h, color, size)
@@ -328,9 +452,24 @@ do
         return l
     end
 
-    makeLabel("Settings", 8, 2, 184, 18, Color3.fromRGB(255, 220, 100), 14).Font = Enum.Font.GothamBold
+    local function makeButton(x, y, w, text, color)
+        local b = Instance.new("TextButton")
+        b.Parent = page
+        b.Position = UDim2.new(0, x, 0, y)
+        b.Size = UDim2.new(0, w, 0, 22)
+        b.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        b.TextColor3 = color or Color3.fromRGB(255, 255, 255)
+        b.Font = Enum.Font.GothamBold
+        b.TextSize = 13
+        b.Text = text
+        b.AutoButtonColor = true
+        b.BorderSizePixel = 0
+        return b
+    end
 
-    local info = makeLabel("", 8, 202, 184, 16, Color3.fromRGB(170, 220, 255), 12)
+    makeLabel("Settings (scroll)", 8, 2, 184, 18, Color3.fromRGB(255, 220, 100), 14).Font = Enum.Font.GothamBold
+
+    local info = makeLabel("", 8, 288, 184, 16, Color3.fromRGB(170, 220, 255), 12)
     local boxes = {}
 
     local function fmt(v)
@@ -344,15 +483,15 @@ do
     end
 
     local function refreshBoxes()
-        boxes.flagDelay.Text = fmt(SET.flagDelay)
-        boxes.flagBatch.Text = tostring(SET.flagBatch)
-        boxes.openDelay.Text = fmt(SET.openDelay)
-        boxes.openBatch.Text = tostring(SET.openBatch)
+        for key, box in pairs(boxes) do
+            box.Text = SET.limits[key][3] and tostring(SET[key]) or fmt(SET[key])
+        end
         refreshInfo()
     end
 
     -- Một dòng: nhãn + ô nhập. Nhập sai thì trả về giá trị cũ; nhập ngoài khoảng thì bị kẹp lại.
-    local function makeRow(key, label, y, lo, hi, isInt)
+    local function makeRow(key, label, y)
+        local lim = SET.limits[key]
         makeLabel(label, 8, y, 112, 22)
         local box = Instance.new("TextBox")
         box.Parent = page
@@ -370,41 +509,41 @@ do
         box.FocusLost:Connect(function()
             local v = tonumber(box.Text)
             if v then
-                v = math.clamp(v, lo, hi)
-                if isInt then v = math.floor(v + 0.5) end
+                v = math.clamp(v, lim[1], lim[2])
+                if lim[3] then v = math.floor(v + 0.5) end
                 SET[key] = v
+                SET.queueSave()
             end
             refreshBoxes()
         end)
     end
 
-    makeRow("flagDelay", "Flag delay (s)", 24, 0.01, 5, false)
-    makeRow("flagBatch", "Flag batch", 50, 1, 60, true)
-    makeRow("openDelay", "Open delay (s)", 76, 0.01, 5, false)
-    makeRow("openBatch", "Open batch", 102, 1, 60, true)
+    makeRow("flagDelay", "Flag delay (s)", 24)
+    makeRow("flagBatch", "Flag batch", 50)
+    makeRow("openDelay", "Open delay (s)", 76)
+    makeRow("openBatch", "Open batch", 102)
+    makeRow("actRange", "Action range", 128)
+    makeRow("totalMines", "Total mines", 154)
+    makeRow("hereThreshold", "Here at mines", 180)
+
+    -- Công tắc bật / tắt
+    local function makeToggle(y, name, getter)
+        local b = makeButton(8, y, 184, name)
+        local function refresh()
+            if getter() then
+                b.Text = name .. ": ON"
+                b.TextColor3 = Color3.fromRGB(0, 255, 0)
+            else
+                b.Text = name .. ": OFF"
+                b.TextColor3 = Color3.fromRGB(255, 120, 120)
+            end
+        end
+        refresh()
+        return b, refresh
+    end
 
     -- Không giẫm mìn: khi bật, mọi ô script đánh dấu / biết là mìn sẽ bị tắt CanTouch
-    local noStepBtn = Instance.new("TextButton")
-    noStepBtn.Parent = page
-    noStepBtn.Position = UDim2.new(0, 8, 0, 128)
-    noStepBtn.Size = UDim2.new(0, 184, 0, 22)
-    noStepBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    noStepBtn.Font = Enum.Font.GothamBold
-    noStepBtn.TextSize = 13
-    noStepBtn.AutoButtonColor = true
-    noStepBtn.BorderSizePixel = 0
-
-    local function refreshNoStep()
-        if SET.noStep then
-            noStepBtn.Text = "NO-STEP MINES: ON"
-            noStepBtn.TextColor3 = Color3.fromRGB(0, 255, 0)
-        else
-            noStepBtn.Text = "NO-STEP MINES: OFF"
-            noStepBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
-        end
-    end
-    refreshNoStep()
-
+    local noStepBtn, refreshNoStep = makeToggle(208, "NO-STEP MINES", function() return SET.noStep end)
     noStepBtn.MouseButton1Click:Connect(function()
         SET.noStep = not SET.noStep
         refreshNoStep()
@@ -414,57 +553,19 @@ do
             if SET.restore then SET.restore() end
             refreshNoStep()
         end
+        SET.queueSave()
     end)
 
     -- Anti-Static: bật = vô hiệu hóa mọi thứ trong game.Players.LocalPlayer.PlayerGui.Gui; tắt = hoạt động lại
-    local antiBtn = Instance.new("TextButton")
-    antiBtn.Parent = page
-    antiBtn.Position = UDim2.new(0, 8, 0, 152)
-    antiBtn.Size = UDim2.new(0, 184, 0, 22)
-    antiBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    antiBtn.Font = Enum.Font.GothamBold
-    antiBtn.TextSize = 13
-    antiBtn.AutoButtonColor = true
-    antiBtn.BorderSizePixel = 0
-
-    local function refreshAnti()
-        if SET.antiStatic then
-            antiBtn.Text = "ANTI-STATIC: ON"
-            antiBtn.TextColor3 = Color3.fromRGB(0, 255, 0)
-        else
-            antiBtn.Text = "ANTI-STATIC: OFF"
-            antiBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
-        end
-    end
-    refreshAnti()
-
+    local antiBtn, refreshAnti = makeToggle(234, "ANTI-STATIC", function() return SET.antiStatic end)
     antiBtn.MouseButton1Click:Connect(function()
         if SET.setAntiStatic then SET.setAntiStatic(not SET.antiStatic) end
         refreshAnti()
+        SET.queueSave()
     end)
 
     -- Đánh dấu ô còn sót: bật / tắt thanh Here, riêng với ESP
-    local markBtn = Instance.new("TextButton")
-    markBtn.Parent = page
-    markBtn.Position = UDim2.new(0, 8, 0, 176)
-    markBtn.Size = UDim2.new(0, 184, 0, 22)
-    markBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    markBtn.Font = Enum.Font.GothamBold
-    markBtn.TextSize = 13
-    markBtn.AutoButtonColor = true
-    markBtn.BorderSizePixel = 0
-
-    local function refreshMark()
-        if SET.markLeftover then
-            markBtn.Text = "MARK LEFTOVER: ON"
-            markBtn.TextColor3 = Color3.fromRGB(0, 255, 0)
-        else
-            markBtn.Text = "MARK LEFTOVER: OFF"
-            markBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
-        end
-    end
-    refreshMark()
-
+    local markBtn, refreshMark = makeToggle(260, "MARK LEFTOVER", function() return SET.markLeftover end)
     markBtn.MouseButton1Click:Connect(function()
         SET.markLeftover = not SET.markLeftover
         -- bật: khởi động bộ giải dùng chung nếu cần; tắt: dừng nó nếu không còn tính năng nào cần
@@ -472,29 +573,30 @@ do
             SET.markLeftover = false
         end
         refreshMark()
+        SET.queueSave()
     end)
 
-    local reset = Instance.new("TextButton")
-    reset.Parent = page
-    reset.Position = UDim2.new(0, 8, 0, 222)
-    reset.Size = UDim2.new(0, 184, 0, 22)
-    reset.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    reset.TextColor3 = Color3.fromRGB(255, 170, 0)
-    reset.Font = Enum.Font.GothamBold
-    reset.TextSize = 13
-    reset.Text = "Reset defaults"
-    reset.AutoButtonColor = true
-    reset.BorderSizePixel = 0
+    -- Lưu / đặt lại
+    local saveBtn = makeButton(8, 308, 90, "Save now", Color3.fromRGB(0, 255, 0))
+    saveBtn.MouseButton1Click:Connect(function() SET.save() end)
+
+    local reset = makeButton(102, 308, 90, "Reset defaults", Color3.fromRGB(255, 170, 0))
     reset.MouseButton1Click:Connect(function()
-        SET.flagDelay = DEFAULTS.flagDelay
-        SET.flagBatch = DEFAULTS.flagBatch
-        SET.openDelay = DEFAULTS.openDelay
-        SET.openBatch = DEFAULTS.openBatch
+        for key, v in pairs(DEFAULTS) do SET[key] = v end
         refreshBoxes()
+        SET.queueSave()
     end)
+
+    SET.msgLabel = makeLabel(SET.saveMsg, 8, 334, 184, 16, Color3.fromRGB(170, 220, 255), 11)
+
+    SET.refreshUI = function()
+        refreshBoxes()
+        refreshNoStep()
+        refreshAnti()
+        refreshMark()
+    end
 
     refreshBoxes()
-    makeDraggable(page, mainFrame)
 end
 
 gearBtn.MouseButton1Click:Connect(function()
@@ -511,11 +613,8 @@ closeBtn.MouseButton1Click:Connect(function() setPanelVisible(false) end)
 -------------------------------------------------------------------------------
 
 local BATCH_SIZE = 30                -- số ô chạm song song mỗi vòng
-local TOTAL_MINES_DEFAULT = 100      -- tổng số mìn của bàn
 local LAST_TILE_DEDUCTION = true     -- tự suy ra các ô còn lại khi đã biết hết phần còn lại (dựa trên tổng số mìn)
 local GLOBAL_MINES_ENABLED = true    -- dùng ràng buộc "tổng số mìn" (tự tắt nếu dữ liệu mâu thuẫn)
-local MINE_MARKER_THRESHOLD = 90     -- đủ số mìn này thì dựng tia "Here"
-local AUTO_RANGE = 60               -- phạm vi thao tác của Auto Flag / Auto Open (studs)
 local SOLVE_RANGE = 120              -- phạm vi giải khi Anti-Lag OFF (studs)
 local ANTI_LAG_DISTANCE = 60         -- phạm vi giải khi Anti-Lag ON (studs)
 local SOLVER_CONTEXT_PADDING = 8
@@ -891,9 +990,27 @@ local function refreshFlagCache()
             local params = OverlapParams.new()
             params.FilterType = Enum.RaycastFilterType.Include
             params.FilterDescendantsInstances = { flagFolder }
-            local radius = AUTO_RANGE + 30
+            local radius = SET.actRange + 30
             for _, desc in ipairs(Workspace:GetPartBoundsInRadius(charPos, radius, params)) do
-                if not cachedSet[desc] then addFlagPos(desc.Position) end
+                -- Loại trừ các ô (tile). Ở Endless, cachedSet chứa MỌI part trong cửa sổ (kể cả part cờ)
+                -- nên phải dùng EL.cand (chỉ các ô) - nếu không cờ bị bỏ sót và Auto Flag bấm lặp lại mãi.
+                if not EL.cand[desc] and not isExcluded(desc) then addFlagPos(desc.Position) end
+            end
+
+            -- Dự phòng: part cờ có CanQuery = false thì truy vấn không gian bỏ sót -> quét các nhánh khác của thư mục Flag
+            local tileRootNow = getTileRoot()
+            for _, child in ipairs(flagFolder:GetChildren()) do
+                if child ~= tileRootNow then
+                    if child:IsA("BasePart") then
+                        if (child.Position - charPos).Magnitude <= radius then addFlagPos(child.Position) end
+                    else
+                        for _, d in ipairs(child:GetDescendants()) do
+                            if d:IsA("BasePart") and (d.Position - charPos).Magnitude <= radius then
+                                addFlagPos(d.Position)
+                            end
+                        end
+                    end
+                end
             end
         else
             for _, desc in ipairs(flagFolder:GetDescendants()) do
@@ -981,7 +1098,7 @@ end
 
 -------------------------------------------------------------------------------
 -- "HERE": thanh dựng đứng + nhãn trên ô chưa mở gần nhất, ô an toàn gần nhất, ô đoán;
--- tất cả chỉ hiện khi số mìn script đã biết >= MINE_MARKER_THRESHOLD.
+-- tất cả chỉ hiện khi số mìn script đã biết >= SET.hereThreshold.
 -- Không bị giới hạn bởi Anti-Lag: không lọc theo phạm vi giải / phạm vi ESP.
 -------------------------------------------------------------------------------
 
@@ -1108,8 +1225,8 @@ local function hereScanUnrevealed(charPos)
 end
 
 local function updateHerePillar(charPos, foundMinesCount)
-    -- Thanh Here (trắng / xanh / vàng) chỉ hiện khi số mìn script đã biết >= MINE_MARKER_THRESHOLD (90)
-    if not isScanning or not SET.markLeftover or foundMinesCount < MINE_MARKER_THRESHOLD then
+    -- Thanh Here (trắng / xanh / vàng) chỉ hiện khi số mìn script đã biết >= SET.hereThreshold (90)
+    if not isScanning or not SET.markLeftover or foundMinesCount < SET.hereThreshold then
         clearHerePillar()
         return
     end
@@ -2229,7 +2346,7 @@ local function deduceLastTiles(charPos)
 
     local unknown = gatherUnknown(charPos)
     local U = #unknown
-    local R = TOTAL_MINES_DEFAULT - countKnownMines()
+    local R = SET.totalMines - countKnownMines()
     if U == 0 or R < 0 or R > U then return false end -- dữ liệu không nhất quán -> bỏ qua
 
     local progressed = false
@@ -2275,7 +2392,7 @@ local function solveBoard(charPos, deadline)
             unknown = {}
         end
 
-        local R = TOTAL_MINES_DEFAULT - countKnownMines()
+        local R = SET.totalMines - countKnownMines()
         analysis = analyzeFrontier(alive, R, O, useGlobal, isEndlessOn and ENDLESS_DEFAULT_DENSITY or nil, deadline, charPos)
         if analysis.conflict then conflicts = conflicts + 1 end
 
@@ -2313,7 +2430,7 @@ local function solveBoard(charPos, deadline)
     end
 
     if not hasSafe and analysis then
-        local R = TOTAL_MINES_DEFAULT - countKnownMines()
+        local R = SET.totalMines - countKnownMines()
         local best = pickGuess(analysis, lastUnknown, charPos, R)
         if best and best ~= currentBestGuess then
             if currentBestGuess then
@@ -2494,6 +2611,26 @@ function SET.setAntiStatic(on)
             task.wait(0.5)
         end
     end)
+end
+
+-- Chống bấm lặp: một ô chỉ được bấm cờ tối đa 2 lần trong 10 giây (phòng khi không nhận ra cờ làm cờ bật / tắt liên tục)
+SET.flagClicks = setmetatable({}, { __mode = "k" })
+
+function SET.flagAllowed(part)
+    local rec = SET.flagClicks[part]
+    if not rec then return true end
+    if os.clock() - rec.t0 > 10 then return true end
+    return rec.n < 2
+end
+
+function SET.flagNote(part)
+    local now = os.clock()
+    local rec = SET.flagClicks[part]
+    if rec and now - rec.t0 <= 10 then
+        rec.n = rec.n + 1
+    else
+        SET.flagClicks[part] = { n = 1, t0 = now }
+    end
 end
 
 local lastFlagRefresh = 0
@@ -2708,7 +2845,7 @@ local function solverTick()
     else
         text = string.format("%s %d/%d | safe %d",
             "Scan" .. autoTag,
-            minesCount, TOTAL_MINES_DEFAULT, safeCount)
+            minesCount, SET.totalMines, safeCount)
     end
     if text ~= lastStatusText then
         lastStatusText = text
@@ -2959,8 +3096,8 @@ autoFlagBtn.MouseButton1Click:Connect(function()
                 local misplaced = {}
                 for part in pairs(knownSafe) do
                     if part.Parent and isUnrevealed(part) and hasFlag(part)
-                        and not onCooldown(part, 0.7) and isMarkConfirmed(part)
-                        and isWithinDistance(part, charPos, AUTO_RANGE) then
+                        and not onCooldown(part, 2.0) and SET.flagAllowed(part) and isMarkConfirmed(part)
+                        and isWithinDistance(part, charPos, SET.actRange) then
                         misplaced[#misplaced + 1] = part
                     end
                 end
@@ -2969,9 +3106,10 @@ autoFlagBtn.MouseButton1Click:Connect(function()
                     if not isAutoFlagging or not isScanning then break end
                     local latest = getCharPos()
                     if latest and knownSafe[part] and isUnrevealed(part)
-                        and isWithinDistance(part, latest, AUTO_RANGE) then
+                        and isWithinDistance(part, latest, SET.actRange) then
                         clickTile(part)
                         stamp(part)
+                        SET.flagNote(part)
                         didWork = true
                         sinceWait = sinceWait + 1
                         if sinceWait >= SET.flagBatch then
@@ -2985,8 +3123,8 @@ autoFlagBtn.MouseButton1Click:Connect(function()
                 local toFlag = {}
                 for part in pairs(knownMines) do
                     if part.Parent and isUnrevealed(part) and not hasFlag(part)
-                        and not onCooldown(part, 0.7) and isMarkConfirmed(part)
-                        and isWithinDistance(part, charPos, AUTO_RANGE) then
+                        and not onCooldown(part, 2.0) and SET.flagAllowed(part) and isMarkConfirmed(part)
+                        and isWithinDistance(part, charPos, SET.actRange) then
                         toFlag[#toFlag + 1] = part
                     end
                 end
@@ -2995,9 +3133,10 @@ autoFlagBtn.MouseButton1Click:Connect(function()
                     if not isAutoFlagging or not isScanning then break end
                     local latest = getCharPos()
                     if latest and knownMines[part] and isUnrevealed(part)
-                        and isWithinDistance(part, latest, AUTO_RANGE) then
+                        and isWithinDistance(part, latest, SET.actRange) then
                         clickTile(part)
                         stamp(part)
+                        SET.flagNote(part)
                         didWork = true
                         sinceWait = sinceWait + 1
                         if sinceWait >= SET.flagBatch then
@@ -3067,7 +3206,7 @@ autoOpenBtn.MouseButton1Click:Connect(function()
                 for part in pairs(knownSafe) do
                     if part.Parent and isUnrevealed(part) and not hasFlag(part)
                         and not onCooldown(part, 0.35) and isMarkConfirmed(part)
-                        and isWithinDistance(part, charPos, AUTO_RANGE) then
+                        and isWithinDistance(part, charPos, SET.actRange) then
                         toReveal[#toReveal + 1] = part
                     end
                 end
@@ -3085,7 +3224,7 @@ autoOpenBtn.MouseButton1Click:Connect(function()
                         if isAutoOpening and isScanning then
                             local latest = getCharPos()
                             if latest and knownSafe[part] and isUnrevealed(part)
-                                and isWithinDistance(part, latest, AUTO_RANGE) then
+                                and isWithinDistance(part, latest, SET.actRange) then
                                 triggerTileTouch(part)
                             end
                         end
@@ -3178,3 +3317,12 @@ end
 
 destroyBtn.MouseButton1Click:Connect(destroyAll)
 env.__MS_CLEANUP = destroyAll
+
+-- Khởi tạo: nạp cài đặt đã lưu rồi áp dụng các tính năng đang bật (MARK LEFTOVER mặc định BẬT)
+SET.load()
+if SET.antiStatic then SET.setAntiStatic(true) end
+if SET.markLeftover or SET.noStep then
+    task.defer(function()
+        if requestEngine then requestEngine() end
+    end)
+end
