@@ -1,4 +1,4 @@
--- V8
+-- V8.5
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -80,7 +80,7 @@ local titleLabel = Instance.new("TextLabel")
 titleLabel.Parent = titleBar
 titleLabel.BackgroundTransparency = 1
 titleLabel.Position = UDim2.new(0, 8, 0, 0)
-titleLabel.Size = UDim2.new(1, -96, 1, 0)
+titleLabel.Size = UDim2.new(1, -124, 1, 0)
 titleLabel.Text = "Minesweeper"
 titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.TextSize = 13
@@ -103,11 +103,25 @@ local function createTitleButton(text, xOffset)
     return b
 end
 
-local collapseBtn = createTitleButton("-", -86)
+local collapseBtn = createTitleButton("-", -114)
+local helpBtn = createTitleButton("", -86)
 local gearBtn = createTitleButton("⚙", -58)
 gearBtn.Font = Enum.Font.SourceSansBold
 gearBtn.TextSize = 18
 local closeBtn = createTitleButton("X", -30)
+
+-- Biểu tượng quyển sách mở (vẽ bằng 2 trang giấy hơi nghiêng) trên nút hướng dẫn
+for _, side in ipairs({ -1, 1 }) do
+    local pg = Instance.new("Frame")
+    pg.Name = "IcoPage"
+    pg.Parent = helpBtn
+    pg.AnchorPoint = Vector2.new(side == -1 and 1 or 0, 0.5)
+    pg.Position = UDim2.new(0.5, side * 1, 0.5, 0)
+    pg.Size = UDim2.new(0, 7, 0, 11)
+    pg.Rotation = side * 8
+    pg.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    pg.BorderSizePixel = 0
+end
 
 local body = Instance.new("Frame")
 body.Name = "Body"
@@ -202,6 +216,8 @@ local SET = {
     actRange = 60,        -- phạm vi thao tác của Auto Flag / Auto Open (studs)
     totalMines = 100,     -- tổng số mìn của bàn (dùng cho suy luận theo tổng số mìn + hiển thị)
     hereThreshold = 90,   -- thanh Here chỉ hiện khi số mìn script đã biết >= giá trị này
+    theme = 1,            -- chỉ số theme trong SET.themes (1 = Default)
+    helpOpen = false,     -- đang ở trang hướng dẫn?
     uiScale = 1,          -- kích thước giao diện (UIScale)
     alpha = 0,            -- độ trong suốt menu (0 = đặc)
     espStyle = 1,         -- 1 = tô + viền, 2 = chỉ viền, 3 = chỉ tô
@@ -236,6 +252,7 @@ SET.limits = {
     guessColor = { 1, 10, true },
     msW = { 80, 400, true },
     msH = { 24, 200, true },
+    theme = { 1, 8, true },
 }
 SET.boolKeys = { "noStep", "antiStatic", "markLeftover", "collapsed", "showMs" }
 SET.extraKeys = { "menuFx", "menuFy", "msFx", "msFy" } -- vị trí menu / khung ms (tỉ lệ 0..1 trong vùng trống của màn hình) -- các công tắc được lưu (không lưu ESP / Auto Flag / Auto Open)
@@ -400,10 +417,11 @@ local requestEngine -- shared solver lifecycle; assigned after solver functions 
 local collapsed = false
 
 local function applyPages()
-    body.Visible = (not collapsed) and not SET.open
+    body.Visible = (not collapsed) and not SET.open and not SET.helpOpen
     if SET.page then SET.page.Visible = (not collapsed) and SET.open end
+    if SET.helpPage then SET.helpPage.Visible = (not collapsed) and SET.helpOpen end
     -- trang Settings cao hơn trang chính một chút
-    mainFrame.Size = UDim2.new(0, PANEL_W, 0, collapsed and TITLE_H or (TITLE_H + (SET.open and 230 or BODY_H)))
+    mainFrame.Size = UDim2.new(0, PANEL_W, 0, collapsed and TITLE_H or (TITLE_H + ((SET.open or SET.helpOpen) and 230 or BODY_H)))
     -- menu đổi kích thước (mở Settings / thu gọn / UIScale) -> giữ nó nằm trọn trong màn hình
     task.defer(function()
         if SET.clampTarget then SET.clampTarget(mainFrame) end
@@ -541,15 +559,75 @@ function SET.applyView()
 
     mainFrame.BackgroundTransparency = SET.alpha
     for _, d in ipairs(mainFrame:GetDescendants()) do
-        if d:IsA("GuiObject") and not d:IsA("ScrollingFrame") and d.BackgroundTransparency < 1 then
+        if d:IsA("GuiObject") and not d:IsA("ScrollingFrame") and d.Name:sub(1, 3) ~= "Ico" and d.BackgroundTransparency < 1 then
             d.BackgroundTransparency = SET.alpha
         end
     end
     task.defer(function() SET.clampTarget(mainFrame) end)
 end
 
+-- THEMES (Default = giao diện gốc; Windows Standard = kiểu Windows cổ điển: xám + thanh tiêu đề xanh navy)
+SET.themes = {
+    { name = "Default", panel = Color3.fromRGB(45, 45, 45), title = Color3.fromRGB(28, 28, 28), titleText = Color3.fromRGB(255, 255, 255),
+      btn = Color3.fromRGB(60, 60, 60), label = Color3.fromRGB(255, 255, 255), header = Color3.fromRGB(255, 220, 100),
+      info = Color3.fromRGB(170, 220, 255), warn = Color3.fromRGB(255, 220, 100), note = Color3.fromRGB(255, 170, 100) },
+    { name = "Windows Standard Demo", panel = Color3.fromRGB(192, 192, 192), title = Color3.fromRGB(0, 0, 128), titleText = Color3.fromRGB(255, 255, 255),
+      btn = Color3.fromRGB(96, 96, 96), label = Color3.fromRGB(0, 0, 0), header = Color3.fromRGB(0, 0, 128),
+      info = Color3.fromRGB(0, 64, 128), warn = Color3.fromRGB(128, 0, 0), note = Color3.fromRGB(128, 64, 0) },
+    { name = "Midnight", panel = Color3.fromRGB(18, 22, 38), title = Color3.fromRGB(10, 12, 24), titleText = Color3.fromRGB(220, 230, 255),
+      btn = Color3.fromRGB(40, 48, 84), label = Color3.fromRGB(230, 235, 255), header = Color3.fromRGB(120, 180, 255),
+      info = Color3.fromRGB(150, 200, 255), warn = Color3.fromRGB(255, 210, 120), note = Color3.fromRGB(255, 170, 120) },
+    { name = "Forest", panel = Color3.fromRGB(28, 44, 32), title = Color3.fromRGB(16, 30, 20), titleText = Color3.fromRGB(230, 255, 230),
+      btn = Color3.fromRGB(46, 74, 52), label = Color3.fromRGB(235, 255, 235), header = Color3.fromRGB(190, 255, 150),
+      info = Color3.fromRGB(150, 230, 190), warn = Color3.fromRGB(255, 230, 120), note = Color3.fromRGB(255, 190, 120) },
+    { name = "Ocean", panel = Color3.fromRGB(14, 40, 56), title = Color3.fromRGB(8, 26, 40), titleText = Color3.fromRGB(225, 248, 255),
+      btn = Color3.fromRGB(24, 72, 98), label = Color3.fromRGB(230, 250, 255), header = Color3.fromRGB(120, 230, 255),
+      info = Color3.fromRGB(150, 220, 255), warn = Color3.fromRGB(255, 230, 140), note = Color3.fromRGB(255, 190, 130) },
+    { name = "Sunset", panel = Color3.fromRGB(60, 34, 40), title = Color3.fromRGB(42, 20, 28), titleText = Color3.fromRGB(255, 235, 220),
+      btn = Color3.fromRGB(100, 52, 60), label = Color3.fromRGB(255, 238, 225), header = Color3.fromRGB(255, 190, 120),
+      info = Color3.fromRGB(255, 200, 170), warn = Color3.fromRGB(255, 240, 140), note = Color3.fromRGB(255, 180, 120) },
+    { name = "Purple", panel = Color3.fromRGB(44, 30, 60), title = Color3.fromRGB(30, 18, 44), titleText = Color3.fromRGB(245, 230, 255),
+      btn = Color3.fromRGB(74, 52, 104), label = Color3.fromRGB(245, 235, 255), header = Color3.fromRGB(230, 170, 255),
+      info = Color3.fromRGB(200, 180, 255), warn = Color3.fromRGB(255, 225, 130), note = Color3.fromRGB(255, 180, 140) },
+    { name = "High Contrast", panel = Color3.fromRGB(0, 0, 0), title = Color3.fromRGB(0, 0, 0), titleText = Color3.fromRGB(255, 255, 0),
+      btn = Color3.fromRGB(30, 30, 30), label = Color3.fromRGB(255, 255, 255), header = Color3.fromRGB(255, 255, 0),
+      info = Color3.fromRGB(0, 255, 255), warn = Color3.fromRGB(255, 255, 0), note = Color3.fromRGB(255, 128, 0) },
+}
+
+-- Tô màu menu theo theme. Chỉ đổi NỀN và các nhãn trung tính (theo Role); màu ý nghĩa (xanh ON / đỏ OFF...) giữ nguyên.
+function SET.applyTheme()
+    local th = SET.themes[SET.theme] or SET.themes[1]
+
+    mainFrame.BackgroundColor3 = th.panel
+    titleBar.BackgroundColor3 = th.title
+    titleLabel.TextColor3 = th.titleText
+    flagWarningLabel.TextColor3 = th.warn
+    antiLagNoteLabel.TextColor3 = th.note
+    if SET.page then SET.page.ScrollBarImageColor3 = th.header end
+    if SET.helpPage then SET.helpPage.ScrollBarImageColor3 = th.header end
+
+    for _, d in ipairs(mainFrame:GetDescendants()) do
+        local role = d:GetAttribute("Role")
+        if role then
+            if th[role] then d.TextColor3 = th[role] end
+        elseif d:IsA("GuiObject") and d.BackgroundTransparency < 1 then
+            local n = d.Name
+            if n:sub(1, 3) == "Ico" or (d:IsA("ScrollingFrame") and n ~= "DropList") then
+                -- biểu tượng / khung cuộn: giữ nguyên
+            elseif n == "DropBox" or n == "DropList" then
+                d.BackgroundColor3 = Color3.fromRGB(12, 12, 12) -- ô theme luôn đen hơn nền menu
+            elseif n == "DropItem" then
+                d.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+            elseif d:IsA("TextButton") or d:IsA("TextBox") or d:IsA("TextLabel") then
+                d.BackgroundColor3 = th.btn
+            end
+        end
+    end
+end
+
 function SET.applyAll()
     SET.applyView()
+    SET.applyTheme()
     if SET.msFrame then
         SET.msFrame.Size = UDim2.new(0, SET.msW, 0, SET.msH)
         SET.msFrame.Visible = SET.showMs
@@ -569,10 +647,10 @@ do
     page.Visible = false
     page.ScrollingDirection = Enum.ScrollingDirection.Y
     page.ScrollBarThickness = 4
-    page.CanvasSize = UDim2.new(0, 0, 0, 716)
+    page.CanvasSize = UDim2.new(0, 0, 0, 748)
     SET.page = page
 
-    local function makeLabel(text, x, y, w, h, color, size)
+    local function makeLabel(text, x, y, w, h, color, size, role)
         local l = Instance.new("TextLabel")
         l.Parent = page
         l.BackgroundTransparency = 1
@@ -584,6 +662,7 @@ do
         l.TextSize = size or 13
         l.TextXAlignment = Enum.TextXAlignment.Left
         l.BorderSizePixel = 0
+        l:SetAttribute("Role", role or "label")
         return l
     end
 
@@ -603,12 +682,13 @@ do
     end
 
     local function makeHeader(text, y)
-        makeLabel(text, 8, y, 184, 14, Color3.fromRGB(255, 220, 100), 12).Font = Enum.Font.GothamBold
+        makeLabel(text, 8, y, 184, 14, Color3.fromRGB(255, 220, 100), 12, "header").Font = Enum.Font.GothamBold
     end
 
-    makeLabel("Settings (scroll)", 8, 2, 184, 18, Color3.fromRGB(255, 220, 100), 14).Font = Enum.Font.GothamBold
+    makeLabel("Settings (scroll)", 8, 2, 184, 18, Color3.fromRGB(255, 220, 100), 14, "header").Font = Enum.Font.GothamBold
 
-    local info = makeLabel("", 8, 614, 184, 16, Color3.fromRGB(170, 220, 255), 12)
+    -- Dòng tốc độ ước tính nằm ngay dưới các ô delay / batch của Flag và Open
+    local info = makeLabel("", 8, 170, 184, 16, Color3.fromRGB(170, 220, 255), 12, "info")
     local boxes = {}
 
     local function fmt(v)
@@ -677,15 +757,165 @@ do
     makeRow("flagBatch", "Flag batch", 92)
     makeRow("openDelay", "Open delay (s)", 118)
     makeRow("openBatch", "Open batch", 144)
-    makeRow("actRange", "Action range", 170)
-    makeRow("totalMines", "Total mines", 196)
-    makeRow("hereThreshold", "Here at mines", 222)
+    -- (dòng ~flags/s | ~opens/s ở y = 170)
+    makeRow("actRange", "Action range", 192)
+    makeRow("totalMines", "Total mines", 218)
+    makeRow("hereThreshold", "Here at mines", 244)
 
-    makeHeader("Interface", 250)
-    makeRow("uiScale", "UI scale", 266)
-    makeRow("alpha", "Transparency", 292)
-    makeRow("msW", "Perf width", 318)
-    makeRow("msH", "Perf height", 344)
+    makeHeader("Interface", 272)
+
+    -- ===== Ô chọn THEME: hộp đen + dấu mũ. Bấm -> dấu mũ xoay ngẫu nhiên trái / phải thành "^" và danh sách
+    -- theme trải ra trong một khung giới hạn (cuộn được), không làm menu dài thêm. =====
+    local ITEM_H, DROP_ROWS = 22, 4
+    local dropOpen, dropBusy = false, false
+
+    local dropBox = Instance.new("TextButton")
+    dropBox.Name = "DropBox"
+    dropBox.Parent = page
+    dropBox.Position = UDim2.new(0, 8, 0, 288)
+    dropBox.Size = UDim2.new(0, 184, 0, 22)
+    dropBox.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+    dropBox.Text = ""
+    dropBox.AutoButtonColor = true
+    dropBox.BorderSizePixel = 0
+    dropBox.ZIndex = 5
+
+    local dropText = Instance.new("TextLabel")
+    dropText.Name = "DropText"
+    dropText.Parent = dropBox
+    dropText.BackgroundTransparency = 1
+    dropText.Position = UDim2.new(0, 8, 0, 0)
+    dropText.Size = UDim2.new(1, -34, 1, 0)
+    dropText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    dropText.Font = Enum.Font.GothamMedium
+    dropText.TextSize = 13
+    dropText.TextXAlignment = Enum.TextXAlignment.Left
+    dropText.TextTruncate = Enum.TextTruncate.AtEnd
+    dropText.BorderSizePixel = 0
+    dropText.ZIndex = 6
+
+    local caret = Instance.new("Frame")
+    caret.Name = "DropCaret"
+    caret.Parent = dropBox
+    caret.BackgroundTransparency = 1
+    caret.AnchorPoint = Vector2.new(0.5, 0.5)
+    caret.Position = UDim2.new(1, -16, 0.5, 0)
+    caret.Size = UDim2.new(0, 16, 0, 16)
+    caret.Rotation = 180 -- đóng: mũi tên úp xuống
+    caret.BorderSizePixel = 0
+    caret.ZIndex = 6
+    for _, side in ipairs({ -1, 1 }) do
+        local bar = Instance.new("Frame")
+        bar.Name = "IcoBar"
+        bar.Parent = caret
+        bar.AnchorPoint = Vector2.new(0.5, 0.5)
+        bar.Size = UDim2.new(0, 9, 0, 2)
+        bar.Position = UDim2.new(0, 8 + side * 3, 0, 9)
+        bar.Rotation = side * 45
+        bar.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        bar.BorderSizePixel = 0
+        bar.ZIndex = 7
+    end
+
+    local dropList = Instance.new("ScrollingFrame")
+    dropList.Name = "DropList"
+    dropList.Parent = page
+    dropList.Position = UDim2.new(0, 8, 0, 312)
+    dropList.Size = UDim2.new(0, 184, 0, 0)
+    dropList.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+    dropList.BorderSizePixel = 0
+    dropList.ClipsDescendants = true
+    dropList.Active = true
+    dropList.Visible = false
+    dropList.ScrollBarThickness = 4
+    dropList.ScrollingDirection = Enum.ScrollingDirection.Y
+    dropList.CanvasSize = UDim2.new(0, 0, 0, #SET.themes * ITEM_H + 2)
+    dropList.ZIndex = 20
+
+    local dropItems = {}
+    for i, th in ipairs(SET.themes) do
+        local item = Instance.new("TextButton")
+        item.Name = "DropItem"
+        item.Parent = dropList
+        item.Position = UDim2.new(0, 0, 0, 1 + (i - 1) * ITEM_H)
+        item.Size = UDim2.new(1, -6, 0, ITEM_H - 2)
+        item.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        item.TextColor3 = Color3.fromRGB(255, 255, 255)
+        item.Font = Enum.Font.GothamMedium
+        item.TextSize = 13
+        item.TextXAlignment = Enum.TextXAlignment.Left
+        item.Text = th.name
+        item.AutoButtonColor = true
+        item.BorderSizePixel = 0
+        item.ZIndex = 21
+        local pad = Instance.new("UIPadding")
+        pad.PaddingLeft = UDim.new(0, 8)
+        pad.Parent = item
+        dropItems[i] = item
+    end
+
+    local function refreshDrop()
+        local th = SET.themes[SET.theme] or SET.themes[1]
+        dropText.Text = "Theme: " .. th.name
+        for i, item in ipairs(dropItems) do
+            item.TextColor3 = (i == SET.theme) and Color3.fromRGB(255, 220, 100) or Color3.fromRGB(255, 255, 255)
+        end
+    end
+
+    local function setDropOpen(state, immediate)
+        dropOpen = state
+        local height = math.min(#SET.themes, DROP_ROWS) * ITEM_H + 2
+        if immediate then
+            dropList.Visible = state
+            dropList.Size = UDim2.new(0, 184, 0, state and height or 0)
+            caret.Rotation = state and 0 or 180
+            dropBusy = false
+            return
+        end
+
+        dropBusy = true
+        if state then dropList.Visible = true end
+
+        -- Dấu mũ xoay NGẪU NHIÊN sang trái hoặc phải 180° để thành "^" (mở) hoặc "v" (đóng)
+        local dir = (math.random(0, 1) == 0) and -1 or 1
+        local target = caret.Rotation + 180 * dir
+        local tinfo = TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local t1 = TweenService:Create(caret, tinfo, { Rotation = target })
+        local t2 = TweenService:Create(dropList, tinfo, { Size = UDim2.new(0, 184, 0, state and height or 0) })
+        t1.Completed:Connect(function()
+            caret.Rotation = target % 360
+            dropBusy = false
+        end)
+        t2.Completed:Connect(function()
+            if not dropOpen then dropList.Visible = false end
+        end)
+        t1:Play()
+        t2:Play()
+    end
+
+    function SET.closeDrop(immediate)
+        if dropOpen then setDropOpen(false, immediate) end
+    end
+
+    dropBox.MouseButton1Click:Connect(function()
+        if dropBusy then return end
+        setDropOpen(not dropOpen)
+    end)
+
+    for i, item in ipairs(dropItems) do
+        item.MouseButton1Click:Connect(function()
+            SET.theme = i
+            SET.applyTheme()
+            refreshDrop()
+            if not dropBusy then setDropOpen(false) end
+            SET.queueSave()
+        end)
+    end
+
+    makeRow("uiScale", "UI scale", 314)
+    makeRow("alpha", "Transparency", 340)
+    makeRow("msW", "Perf width", 366)
+    makeRow("msH", "Perf height", 392)
 
     -- Nút đổi giá trị theo vòng (kiểu ESP / màu)
     local function makeCycle(y, getText, getColor, onClick)
@@ -704,25 +934,25 @@ do
         return b, refresh
     end
 
-    makeHeader("ESP", 370)
-    local _, refreshStyle = makeCycle(386,
+    makeHeader("ESP", 418)
+    local _, refreshStyle = makeCycle(434,
         function() return "ESP STYLE: " .. SET.styleNames[SET.espStyle] end, nil,
         function() SET.espStyle = SET.espStyle % #SET.styleNames + 1 end)
-    local _, refreshMine = makeCycle(412,
+    local _, refreshMine = makeCycle(460,
         function() return "MINE COLOR: " .. SET.palette[SET.mineColor][1] end,
         function() return SET.palette[SET.mineColor][2] end,
         function() SET.mineColor = SET.mineColor % #SET.palette + 1 end)
-    local _, refreshSafe = makeCycle(438,
+    local _, refreshSafe = makeCycle(486,
         function() return "SAFE COLOR: " .. SET.palette[SET.safeColor][1] end,
         function() return SET.palette[SET.safeColor][2] end,
         function() SET.safeColor = SET.safeColor % #SET.palette + 1 end)
-    local _, refreshGuess = makeCycle(464,
+    local _, refreshGuess = makeCycle(512,
         function() return "GUESS COLOR: " .. SET.palette[SET.guessColor][1] end,
         function() return SET.palette[SET.guessColor][2] end,
         function() SET.guessColor = SET.guessColor % #SET.palette + 1 end)
 
     -- Công tắc bật / tắt
-    makeHeader("Toggles", 492)
+    makeHeader("Toggles", 540)
     local function makeToggle(y, name, getter)
         local b = makeButton(8, y, 184, name)
         local function refresh()
@@ -739,7 +969,7 @@ do
     end
 
     -- Không giẫm mìn: khi bật, mọi ô script đánh dấu / biết là mìn sẽ bị tắt CanTouch
-    local noStepBtn, refreshNoStep = makeToggle(508, "NO-STEP MINES", function() return SET.noStep end)
+    local noStepBtn, refreshNoStep = makeToggle(556, "NO-STEP MINES", function() return SET.noStep end)
     noStepBtn.MouseButton1Click:Connect(function()
         SET.noStep = not SET.noStep
         refreshNoStep()
@@ -753,7 +983,7 @@ do
     end)
 
     -- Anti-Static: bật = vô hiệu hóa mọi thứ trong game.Players.LocalPlayer.PlayerGui.Gui; tắt = hoạt động lại
-    local antiBtn, refreshAnti = makeToggle(534, "ANTI-STATIC", function() return SET.antiStatic end)
+    local antiBtn, refreshAnti = makeToggle(582, "ANTI-STATIC", function() return SET.antiStatic end)
     antiBtn.MouseButton1Click:Connect(function()
         if SET.setAntiStatic then SET.setAntiStatic(not SET.antiStatic) end
         refreshAnti()
@@ -761,7 +991,7 @@ do
     end)
 
     -- Đánh dấu ô còn sót: bật / tắt thanh Here, riêng với ESP
-    local markBtn, refreshMark = makeToggle(560, "MARK LEFTOVER", function() return SET.markLeftover end)
+    local markBtn, refreshMark = makeToggle(608, "MARK LEFTOVER", function() return SET.markLeftover end)
     markBtn.MouseButton1Click:Connect(function()
         SET.markLeftover = not SET.markLeftover
         if requestEngine and not requestEngine() then
@@ -772,7 +1002,7 @@ do
     end)
 
     -- Khung thời gian (ms)
-    local msBtn, refreshMs = makeToggle(586, "SHOW PERF (ms)", function() return SET.showMs end)
+    local msBtn, refreshMs = makeToggle(634, "SHOW PERF (ms)", function() return SET.showMs end)
     msBtn.MouseButton1Click:Connect(function()
         SET.showMs = not SET.showMs
         SET.applyAll()
@@ -781,25 +1011,26 @@ do
     end)
 
     -- Lưu / đặt lại
-    local saveBtn = makeButton(8, 636, 90, "Save now", Color3.fromRGB(0, 255, 0))
+    local saveBtn = makeButton(8, 666, 90, "Save now", Color3.fromRGB(0, 255, 0))
     saveBtn.MouseButton1Click:Connect(function() SET.save() end)
 
     local function refreshCycles()
         refreshStyle(); refreshMine(); refreshSafe(); refreshGuess()
     end
 
-    local reset = makeButton(102, 636, 90, "Reset defaults", Color3.fromRGB(255, 170, 0))
+    local reset = makeButton(102, 666, 90, "Reset defaults", Color3.fromRGB(255, 170, 0))
     reset.MouseButton1Click:Connect(function()
         for key, v in pairs(DEFAULTS) do SET[key] = v end
         refreshBoxes()
         refreshCycles()
+        refreshDrop()
         SET.applyAll()
         if SET.espChanged then SET.espChanged() end
         SET.queueSave()
     end)
 
     -- Đưa menu / khung ms về vị trí mặc định (phòng khi bị lọt khỏi tầm thao tác)
-    local resetPos = makeButton(8, 662, 184, "Reset GUI position", Color3.fromRGB(255, 170, 0))
+    local resetPos = makeButton(8, 692, 184, "Reset GUI position", Color3.fromRGB(255, 170, 0))
     resetPos.MouseButton1Click:Connect(function()
         mainFrame.Position = SET.defaultMenuPos
         if SET.msFrame then SET.msFrame.Position = SET.defaultMsPos end
@@ -811,11 +1042,12 @@ do
         SET.queueSave()
     end)
 
-    SET.msgLabel = makeLabel(SET.saveMsg, 8, 690, 184, 16, Color3.fromRGB(170, 220, 255), 11)
+    SET.msgLabel = makeLabel(SET.saveMsg, 8, 720, 184, 16, Color3.fromRGB(170, 220, 255), 11, "info")
 
     SET.refreshUI = function()
         refreshBoxes()
         refreshCycles()
+        refreshDrop()
         refreshNoStep()
         refreshAnti()
         refreshMark()
@@ -823,6 +1055,94 @@ do
     end
 
     refreshBoxes()
+    refreshDrop()
+end
+
+-- Trang hướng dẫn (quyển sách trên thanh tiêu đề)
+do
+    local hp = Instance.new("ScrollingFrame")
+    hp.Name = "HelpPage"
+    hp.Parent = mainFrame
+    hp.BackgroundTransparency = 1
+    hp.Position = UDim2.new(0, 0, 0, TITLE_H)
+    hp.Size = UDim2.new(1, 0, 1, -TITLE_H)
+    hp.BorderSizePixel = 0
+    hp.Active = true
+    hp.Visible = false
+    hp.ScrollingDirection = Enum.ScrollingDirection.Y
+    hp.ScrollBarThickness = 4
+    hp.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    hp.CanvasSize = UDim2.new(0, 0, 0, 0)
+    SET.helpPage = hp
+
+    local txt = Instance.new("TextLabel")
+    txt.Name = "HelpText"
+    txt.Parent = hp
+    txt.BackgroundTransparency = 1
+    txt.Position = UDim2.new(0, 8, 0, 4)
+    txt.Size = UDim2.new(0, 178, 0, 0)
+    txt.AutomaticSize = Enum.AutomaticSize.Y
+    txt.TextWrapped = true
+    txt.RichText = true
+    txt.TextXAlignment = Enum.TextXAlignment.Left
+    txt.TextYAlignment = Enum.TextYAlignment.Top
+    txt.Font = Enum.Font.Gotham
+    txt.TextSize = 12
+    txt.TextColor3 = Color3.fromRGB(255, 255, 255)
+    txt.BorderSizePixel = 0
+    txt:SetAttribute("Role", "label")
+
+    txt.Text = table.concat({
+        "<b>GUIDE</b> (scroll down)",
+        "",
+        "<b>TITLE BAR</b>",
+        "- [-]  collapse / expand the menu. While collapsed the title shows the live status.",
+        "- Book  this guide.",
+        "- Gear  Settings page. Press it again to go back.",
+        "- [X]  hide the menu. Tap the round MS icon to bring it back.",
+        "- Drag the title bar to move the menu. Its position is saved and always kept on screen.",
+        "",
+        "<b>MAIN PAGE</b>",
+        "- ESP: draws the solver results on the board. Red = sure mine, green = sure safe, yellow = best guess.",
+        "- AUTO FLAG: places flags on sure mines and removes flags from sure safe tiles. Speed comes from Flag delay and Flag batch.",
+        "- ANTI-LAG: lighter mode with a smaller solving / ESP range (60 studs) and slower scanning. In Endless it selects the light profile.",
+        "- ENDLESS: for the endless board. Only the tiles around you are loaded and solved, and the global mine-count rules are off.",
+        "- AUTO OPEN: touches sure safe tiles to open them. Speed comes from Open delay and Open batch.",
+        "- Destroy UI: stops everything, restores every property the script changed and removes the menu.",
+        "- Status line: current mode, mines known / total, safe tiles found and tiles scanned.",
+        "",
+        "<b>SETTINGS</b>",
+        "- Presets: Safe, Normal, Fast and Endless set the delays, batches and range in one tap.",
+        "- Flag delay: seconds between flag batches. Flag batch: flags placed or removed per batch.",
+        "- Open delay / Open batch: the same for opening tiles.",
+        "- The line under them shows the estimated flags per second and opens per second.",
+        "- Action range: how far (studs) Auto Flag and Auto Open may act.",
+        "- Total mines: mines on the board. Used by the mine-count rules and the status line.",
+        "- Here at mines: the Here pillars appear only after this many mines are known.",
+        "",
+        "<b>INTERFACE</b>",
+        "- Theme: the black box with an arrow. Tap it to open a scrollable list of themes (Default, Windows Standard and more).",
+        "- UI scale: size of the menu. Transparency: how see-through it is.",
+        "- Perf width / height: size of the ms box. You can also drag its + corner.",
+        "",
+        "<b>ESP</b>",
+        "- ESP STYLE: fill + border, border only, or fill only.",
+        "- MINE / SAFE / GUESS COLOR: tap to cycle through the colors.",
+        "",
+        "<b>TOGGLES</b>",
+        "- NO-STEP MINES: turns CanTouch off on known mines. It may do nothing if the server checks the touches.",
+        "- ANTI-STATIC: disables everything inside PlayerGui.Gui. Turn it off to restore it.",
+        "- MARK LEFTOVER: shows the Here pillars (white = nearest unopened, green = safe, yellow = guess). Works without ESP.",
+        "- SHOW PERF (ms): shows a draggable, resizable box with tick, solve and scan time.",
+        "",
+        "<b>SAVING</b>",
+        "- Settings are saved automatically to MinesweeperS/Save in the Delta workspace. Save now writes immediately.",
+        "- Reset defaults restores the numbers, colors and theme. Reset GUI position puts the menu back on screen.",
+        "",
+        "<b>TIPS</b>",
+        "- If tiles still explode, use the Safe preset and lower Action range.",
+        "- Flags are never needed by the solver. It only reads the numbers.",
+    }, "\n")
 end
 
 -- Khung thời gian (ms): kéo thả được, đổi kích thước bằng tay nắm ở góc dưới phải (hoặc ô nhập trong Settings)
@@ -924,10 +1244,32 @@ do
     end))
 end
 
+-- Tô sáng nút đang mở trang (bánh răng / quyển sách)
+local function refreshTitleIcons()
+    gearBtn.TextColor3 = SET.open and Color3.fromRGB(255, 220, 100) or Color3.fromRGB(255, 255, 255)
+    local c = SET.helpOpen and Color3.fromRGB(255, 220, 100) or Color3.fromRGB(255, 255, 255)
+    for _, ch in ipairs(helpBtn:GetChildren()) do
+        if ch.Name == "IcoPage" then ch.BackgroundColor3 = c end
+    end
+end
+
 gearBtn.MouseButton1Click:Connect(function()
     if collapsed then setCollapsed(false) end
     SET.open = not SET.open
-    gearBtn.TextColor3 = SET.open and Color3.fromRGB(255, 220, 100) or Color3.fromRGB(255, 255, 255)
+    if SET.open then SET.helpOpen = false end
+    if not SET.open and SET.closeDrop then SET.closeDrop(true) end
+    refreshTitleIcons()
+    applyPages()
+end)
+
+helpBtn.MouseButton1Click:Connect(function()
+    if collapsed then setCollapsed(false) end
+    SET.helpOpen = not SET.helpOpen
+    if SET.helpOpen then
+        SET.open = false
+        if SET.closeDrop then SET.closeDrop(true) end
+    end
+    refreshTitleIcons()
     applyPages()
 end)
 collapseBtn.MouseButton1Click:Connect(function() setCollapsed(not collapsed) end)
