@@ -1,4 +1,4 @@
--- V9.1
+-- V9.15
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -1550,7 +1550,7 @@ local ENDLESS_GUESS_OUTSIDE = false   -- false: Endless chỉ đoán trên ô bi
 local CONFIRM_DELAY = 0.2             -- (Endless) ô mìn/an toàn phải tồn tại >= 0.2s mới được auto touch
 local ENDLESS_DEFAULT_DENSITY = 0.2   -- xác suất mìn ước lượng cho ô chưa có thông tin
 
-local isEndlessOn = true
+local isEndlessOn = false
 local endlessLastCenter = nil
 local endlessTileDim = 8
 local customUnrevealed = nil           -- màu ô chưa mở đã học thêm (Endless), dùng song song với màu mặc định
