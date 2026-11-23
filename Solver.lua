@@ -1,5 +1,4 @@
--- V9
--- Turn Endless
+-- V9.1
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -1551,7 +1550,7 @@ local ENDLESS_GUESS_OUTSIDE = false   -- false: Endless chỉ đoán trên ô bi
 local CONFIRM_DELAY = 0.2             -- (Endless) ô mìn/an toàn phải tồn tại >= 0.2s mới được auto touch
 local ENDLESS_DEFAULT_DENSITY = 0.2   -- xác suất mìn ước lượng cho ô chưa có thông tin
 
-local isEndlessOn = false
+local isEndlessOn = true
 local endlessLastCenter = nil
 local endlessTileDim = 8
 local customUnrevealed = nil           -- màu ô chưa mở đã học thêm (Endless), dùng song song với màu mặc định
@@ -1798,9 +1797,14 @@ local function isNumberColor(part)
 end
 
 -- Ô chưa mở: chỉ dựa trên màu (không phụ thuộc cache số) để phát hiện ván reset
--- Hai màu ô chưa mở mặc định: RGB(205,142,100) & RGB(180,125,88)
+-- Bốn màu ô chưa mở mặc định, hỗ trợ cả hai kiểu bàn:
+-- Cũ: RGB(205,142,100) & RGB(180,125,88)
+-- Mới: RGB(117,205,100) & RGB(103,180,88)
 local function isDefaultUnrevealedColor(c)
-    return isColorMatch(c, 0.804, 0.557, 0.392) or isColorMatch(c, 0.706, 0.490, 0.345)
+    return isColorMatch(c, 0.804, 0.557, 0.392)
+        or isColorMatch(c, 0.706, 0.490, 0.345)
+        or isColorMatch(c, 0.459, 0.804, 0.392)
+        or isColorMatch(c, 0.404, 0.706, 0.345)
 end
 
 local function isUnrevealed(part)
@@ -2425,7 +2429,7 @@ end
 -- ENDLESS: lấy các part trong ENDLESS_RANGE (+đệm) quanh người chơi làm "cửa sổ" giải
 -- Học màu "ô chưa mở" cho Endless:
 --  * Ô số RGB(230,230,113) / ô rác RGB(255,255,125) / ô đọc được NumberGui số: loại khỏi thống kê
---  * Thấy ô chưa mở màu mặc định -> không cần học
+--  * Các màu ô chưa mở mặc định (205,142,100), (180,125,88), (117,205,100), (103,180,88) -> không cần học
 --  * KHÔNG thấy ô mặc định nào mà có các màu khác -> lấy tối đa 2 màu xuất hiện nhiều nhất làm ô chưa mở
 --  * Màu đã học được GIỮ và dùng song song với màu mặc định (không bật/tắt theo từng vùng)
 local function calibrateUnrevealedColors(found)
