@@ -1,4 +1,4 @@
--- V6.4
+-- V8
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -202,6 +202,17 @@ local SET = {
     actRange = 60,        -- phạm vi thao tác của Auto Flag / Auto Open (studs)
     totalMines = 100,     -- tổng số mìn của bàn (dùng cho suy luận theo tổng số mìn + hiển thị)
     hereThreshold = 90,   -- thanh Here chỉ hiện khi số mìn script đã biết >= giá trị này
+    uiScale = 1,          -- kích thước giao diện (UIScale)
+    alpha = 0,            -- độ trong suốt menu (0 = đặc)
+    espStyle = 1,         -- 1 = tô + viền, 2 = chỉ viền, 3 = chỉ tô
+    mineColor = 1,        -- chỉ số màu trong SET.palette (Red)
+    safeColor = 7,        -- Green
+    guessColor = 9,       -- Yellow
+    msW = 190, msH = 62,  -- kích thước khung thời gian (ms)
+    showMs = false,       -- hiện khung thời gian (ms)
+    collapsed = false,    -- menu đang thu gọn?
+    resizing = false,
+    ready = false,        -- đã khởi tạo xong (từ đó thay đổi mới được tự lưu)
     markLeftover = true,  -- Đánh dấu ô còn sót: bật thanh Here (độc lập với ESP) - mặc định BẬT
     antiStatic = false, -- Anti-Static: vô hiệu hóa mọi thứ trong PlayerGui.Gui
     noStep = false,    -- Không giẫm mìn: tắt CanTouch của các ô script biết là mìn
@@ -217,11 +228,57 @@ SET.limits = {
     actRange = { 10, 300, false },
     totalMines = { 1, 99999, true },
     hereThreshold = { 0, 99999, true },
+    uiScale = { 0.6, 1.4, false },
+    alpha = { 0, 0.8, false },
+    espStyle = { 1, 3, true },
+    mineColor = { 1, 10, true },
+    safeColor = { 1, 10, true },
+    guessColor = { 1, 10, true },
+    msW = { 80, 400, true },
+    msH = { 24, 200, true },
 }
-SET.boolKeys = { "noStep", "antiStatic", "markLeftover" } -- các công tắc được lưu (không lưu ESP / Auto Flag / Auto Open)
+SET.boolKeys = { "noStep", "antiStatic", "markLeftover", "collapsed", "showMs" }
+SET.extraKeys = { "menuFx", "menuFy", "msFx", "msFy" } -- vị trí menu / khung ms (tỉ lệ 0..1 trong vùng trống của màn hình) -- các công tắc được lưu (không lưu ESP / Auto Flag / Auto Open)
+
+-- Bảng màu ESP (đổi bằng nút trong Settings)
+SET.palette = {
+    { "Red", Color3.fromRGB(255, 0, 0) },
+    { "Orange", Color3.fromRGB(255, 140, 0) },
+    { "Pink", Color3.fromRGB(255, 105, 180) },
+    { "Magenta", Color3.fromRGB(255, 0, 255) },
+    { "Blue", Color3.fromRGB(60, 120, 255) },
+    { "Cyan", Color3.fromRGB(0, 230, 255) },
+    { "Green", Color3.fromRGB(0, 255, 0) },
+    { "Lime", Color3.fromRGB(170, 255, 0) },
+    { "Yellow", Color3.fromRGB(255, 255, 0) },
+    { "White", Color3.fromRGB(255, 255, 255) },
+}
+SET.styleNames = { "FILL+BORDER", "BORDER ONLY", "FILL ONLY" }
+
+-- Preset nhanh (chỉ đổi các giá trị số)
+SET.presets = {
+    { "Safe",    { flagDelay = 0.10, flagBatch = 1, openDelay = 0.15, openBatch = 5,  actRange = 50 } },
+    { "Normal",  { flagDelay = 0.02, flagBatch = 1, openDelay = 0.05, openBatch = 30, actRange = 60 } },
+    { "Fast",    { flagDelay = 0.01, flagBatch = 5, openDelay = 0.03, openBatch = 60, actRange = 60 } },
+    { "Endless", { flagDelay = 0.05, flagBatch = 2, openDelay = 0.10, openBatch = 12, actRange = 60 } },
+}
+
+function SET.colorFor(name, fallback)
+    local idx
+    if name == "Mine_Highlight" then
+        idx = SET.mineColor
+    elseif name == "Safe_Highlight" then
+        idx = SET.safeColor
+    elseif name == "Guess_Highlight" then
+        idx = SET.guessColor
+    end
+    local entry = idx and SET.palette[idx]
+    return entry and entry[2] or fallback
+end
 
 local DEFAULTS = {}
 for key in pairs(SET.limits) do DEFAULTS[key] = SET[key] end
+SET.defaultMenuPos = mainFrame.Position
 
 -- LƯU / NẠP cài đặt (JSON). File: <Workspace của Delta>/MinesweeperS/Save
 --   = /storage/emulated/0/Delta/Workspace/MinesweeperS/Save
@@ -240,6 +297,13 @@ function SET.collect()
     local t = {}
     for key in pairs(SET.limits) do t[key] = SET[key] end
     for _, key in ipairs(SET.boolKeys) do t[key] = SET[key] == true end
+    if SET.capture then
+        SET.capture(mainFrame, "menuFx", "menuFy")
+        if SET.msFrame then SET.capture(SET.msFrame, "msFx", "msFy") end
+    end
+    for _, key in ipairs(SET.extraKeys) do
+        if SET[key] ~= nil then t[key] = SET[key] end
+    end
     return t
 end
 
@@ -322,6 +386,10 @@ function SET.load()
     for _, key in ipairs(SET.boolKeys) do
         if type(data[key]) == "boolean" then SET[key] = data[key] end
     end
+    for _, key in ipairs(SET.extraKeys) do
+        local v = tonumber(data[key])
+        if v then SET[key] = math.clamp(v, 0, 1) end
+    end
 
     SET.setMsg("Loaded: MinesweeperS/Save")
     if SET.refreshUI then SET.refreshUI() end
@@ -336,10 +404,16 @@ local function applyPages()
     if SET.page then SET.page.Visible = (not collapsed) and SET.open end
     -- trang Settings cao hơn trang chính một chút
     mainFrame.Size = UDim2.new(0, PANEL_W, 0, collapsed and TITLE_H or (TITLE_H + (SET.open and 230 or BODY_H)))
+    -- menu đổi kích thước (mở Settings / thu gọn / UIScale) -> giữ nó nằm trọn trong màn hình
+    task.defer(function()
+        if SET.clampTarget then SET.clampTarget(mainFrame) end
+    end)
 end
 
 local function setCollapsed(c)
     collapsed = c
+    SET.collapsed = c
+    if SET.ready then SET.queueSave() end
     applyPages()
     collapseBtn.Text = c and "+" or "-"
     titleLabel.Text = c and status.Text or "Minesweeper"
@@ -357,7 +431,7 @@ end)
 
 -- Kéo thả dùng chung (PC + Mobile): theo dõi toàn màn hình, giới hạn trong khung nhìn,
 -- ngưỡng 6px để phân biệt "chạm" và "kéo"
-local function makeDraggable(handle, target, onTap)
+local function makeDraggable(handle, target, onTap, onMoved)
     local dragging, moved = false, false
     local dragStart, startAbs, startPosition
 
@@ -376,13 +450,14 @@ local function makeDraggable(handle, target, onTap)
                     dragging = false
                     conn:Disconnect()
                     if not moved and onTap then onTap() end
+                    if moved and onMoved then onMoved() end
                 end
             end)
         end
     end)
 
     table.insert(uiConns, UserInputService.InputChanged:Connect(function(input)
-        if not dragging then return end
+        if not dragging or SET.resizing then return end
         if input.UserInputType ~= Enum.UserInputType.MouseMovement
             and input.UserInputType ~= Enum.UserInputType.Touch then
             return
@@ -418,9 +493,69 @@ local function makeDraggable(handle, target, onTap)
     end))
 end
 
-makeDraggable(titleBar, mainFrame)
-makeDraggable(body, mainFrame)
+makeDraggable(titleBar, mainFrame, nil, function() SET.queueSave() end)
+makeDraggable(body, mainFrame, nil, function() SET.queueSave() end)
 makeDraggable(iconBtn, iconBtn, function() setPanelVisible(not mainFrame.Visible) end)
+
+-- Giữ một khung nằm trọn trong màn hình (dùng khi nạp vị trí đã lưu / đổi kích thước / xoay màn hình)
+function SET.clampTarget(target)
+    if not target or not target.Parent then return end
+    local gp, gs = screenGui.AbsolutePosition, screenGui.AbsoluteSize
+    if gs.X < 1 or gs.Y < 1 then return end
+    local size, ap = target.AbsoluteSize, target.AbsolutePosition
+    local maxX = math.max(gp.X, gp.X + gs.X - size.X)
+    local maxY = math.max(gp.Y, gp.Y + gs.Y - size.Y)
+    local x = math.clamp(ap.X, gp.X, maxX)
+    local y = math.clamp(ap.Y, gp.Y, maxY)
+    if math.abs(x - ap.X) > 0.5 or math.abs(y - ap.Y) > 0.5 then
+        target.Position = UDim2.fromOffset(x - gp.X, y - gp.Y)
+    end
+end
+
+-- Lưu vị trí khung theo TỈ LỆ vùng trống của màn hình -> nạp lại luôn nằm trong màn hình dù kích thước khác
+function SET.capture(frame, kx, ky)
+    local gp, gs = screenGui.AbsolutePosition, screenGui.AbsoluteSize
+    if gs.X < 1 or gs.Y < 1 or not frame or not frame.Parent then return end
+    local size, ap = frame.AbsoluteSize, frame.AbsolutePosition
+    SET[kx] = math.clamp((ap.X - gp.X) / math.max(1, gs.X - size.X), 0, 1)
+    SET[ky] = math.clamp((ap.Y - gp.Y) / math.max(1, gs.Y - size.Y), 0, 1)
+end
+
+function SET.place(frame, kx, ky)
+    local fx, fy = SET[kx], SET[ky]
+    if fx == nil or fy == nil or not frame or not frame.Parent then return end
+    local gs = screenGui.AbsoluteSize
+    if gs.X < 1 or gs.Y < 1 then return end
+    local size = frame.AbsoluteSize
+    frame.Position = UDim2.fromOffset(fx * math.max(0, gs.X - size.X), fy * math.max(0, gs.Y - size.Y))
+end
+
+-- Áp dụng UIScale + độ trong suốt cho menu
+function SET.applyView()
+    if not SET.scaleObj then
+        local u = Instance.new("UIScale")
+        u.Parent = mainFrame
+        SET.scaleObj = u
+    end
+    SET.scaleObj.Scale = SET.uiScale
+
+    mainFrame.BackgroundTransparency = SET.alpha
+    for _, d in ipairs(mainFrame:GetDescendants()) do
+        if d:IsA("GuiObject") and not d:IsA("ScrollingFrame") and d.BackgroundTransparency < 1 then
+            d.BackgroundTransparency = SET.alpha
+        end
+    end
+    task.defer(function() SET.clampTarget(mainFrame) end)
+end
+
+function SET.applyAll()
+    SET.applyView()
+    if SET.msFrame then
+        SET.msFrame.Size = UDim2.new(0, SET.msW, 0, SET.msH)
+        SET.msFrame.Visible = SET.showMs
+        task.defer(function() SET.clampTarget(SET.msFrame) end)
+    end
+end
 
 do
     local page = Instance.new("ScrollingFrame")
@@ -434,7 +569,7 @@ do
     page.Visible = false
     page.ScrollingDirection = Enum.ScrollingDirection.Y
     page.ScrollBarThickness = 4
-    page.CanvasSize = UDim2.new(0, 0, 0, 360)
+    page.CanvasSize = UDim2.new(0, 0, 0, 716)
     SET.page = page
 
     local function makeLabel(text, x, y, w, h, color, size)
@@ -467,9 +602,13 @@ do
         return b
     end
 
+    local function makeHeader(text, y)
+        makeLabel(text, 8, y, 184, 14, Color3.fromRGB(255, 220, 100), 12).Font = Enum.Font.GothamBold
+    end
+
     makeLabel("Settings (scroll)", 8, 2, 184, 18, Color3.fromRGB(255, 220, 100), 14).Font = Enum.Font.GothamBold
 
-    local info = makeLabel("", 8, 288, 184, 16, Color3.fromRGB(170, 220, 255), 12)
+    local info = makeLabel("", 8, 614, 184, 16, Color3.fromRGB(170, 220, 255), 12)
     local boxes = {}
 
     local function fmt(v)
@@ -512,21 +651,78 @@ do
                 v = math.clamp(v, lim[1], lim[2])
                 if lim[3] then v = math.floor(v + 0.5) end
                 SET[key] = v
+                SET.applyAll()
                 SET.queueSave()
             end
             refreshBoxes()
         end)
     end
 
-    makeRow("flagDelay", "Flag delay (s)", 24)
-    makeRow("flagBatch", "Flag batch", 50)
-    makeRow("openDelay", "Open delay (s)", 76)
-    makeRow("openBatch", "Open batch", 102)
-    makeRow("actRange", "Action range", 128)
-    makeRow("totalMines", "Total mines", 154)
-    makeRow("hereThreshold", "Here at mines", 180)
+    -- Preset nhanh
+    makeHeader("Presets", 22)
+    for i, preset in ipairs(SET.presets) do
+        local b = makeButton(8 + (i - 1) * 46, 38, 44, preset[1], Color3.fromRGB(170, 220, 255))
+        b.TextScaled = true
+        b.MouseButton1Click:Connect(function()
+            for key, v in pairs(preset[2]) do
+                local lim = SET.limits[key]
+                SET[key] = math.clamp(v, lim[1], lim[2])
+            end
+            refreshBoxes()
+            SET.queueSave()
+        end)
+    end
+
+    makeRow("flagDelay", "Flag delay (s)", 66)
+    makeRow("flagBatch", "Flag batch", 92)
+    makeRow("openDelay", "Open delay (s)", 118)
+    makeRow("openBatch", "Open batch", 144)
+    makeRow("actRange", "Action range", 170)
+    makeRow("totalMines", "Total mines", 196)
+    makeRow("hereThreshold", "Here at mines", 222)
+
+    makeHeader("Interface", 250)
+    makeRow("uiScale", "UI scale", 266)
+    makeRow("alpha", "Transparency", 292)
+    makeRow("msW", "Perf width", 318)
+    makeRow("msH", "Perf height", 344)
+
+    -- Nút đổi giá trị theo vòng (kiểu ESP / màu)
+    local function makeCycle(y, getText, getColor, onClick)
+        local b = makeButton(8, y, 184, "")
+        local function refresh()
+            b.Text = getText()
+            b.TextColor3 = getColor and getColor() or Color3.fromRGB(255, 255, 255)
+        end
+        refresh()
+        b.MouseButton1Click:Connect(function()
+            onClick()
+            refresh()
+            if SET.espChanged then SET.espChanged() end
+            SET.queueSave()
+        end)
+        return b, refresh
+    end
+
+    makeHeader("ESP", 370)
+    local _, refreshStyle = makeCycle(386,
+        function() return "ESP STYLE: " .. SET.styleNames[SET.espStyle] end, nil,
+        function() SET.espStyle = SET.espStyle % #SET.styleNames + 1 end)
+    local _, refreshMine = makeCycle(412,
+        function() return "MINE COLOR: " .. SET.palette[SET.mineColor][1] end,
+        function() return SET.palette[SET.mineColor][2] end,
+        function() SET.mineColor = SET.mineColor % #SET.palette + 1 end)
+    local _, refreshSafe = makeCycle(438,
+        function() return "SAFE COLOR: " .. SET.palette[SET.safeColor][1] end,
+        function() return SET.palette[SET.safeColor][2] end,
+        function() SET.safeColor = SET.safeColor % #SET.palette + 1 end)
+    local _, refreshGuess = makeCycle(464,
+        function() return "GUESS COLOR: " .. SET.palette[SET.guessColor][1] end,
+        function() return SET.palette[SET.guessColor][2] end,
+        function() SET.guessColor = SET.guessColor % #SET.palette + 1 end)
 
     -- Công tắc bật / tắt
+    makeHeader("Toggles", 492)
     local function makeToggle(y, name, getter)
         local b = makeButton(8, y, 184, name)
         local function refresh()
@@ -543,7 +739,7 @@ do
     end
 
     -- Không giẫm mìn: khi bật, mọi ô script đánh dấu / biết là mìn sẽ bị tắt CanTouch
-    local noStepBtn, refreshNoStep = makeToggle(208, "NO-STEP MINES", function() return SET.noStep end)
+    local noStepBtn, refreshNoStep = makeToggle(508, "NO-STEP MINES", function() return SET.noStep end)
     noStepBtn.MouseButton1Click:Connect(function()
         SET.noStep = not SET.noStep
         refreshNoStep()
@@ -557,7 +753,7 @@ do
     end)
 
     -- Anti-Static: bật = vô hiệu hóa mọi thứ trong game.Players.LocalPlayer.PlayerGui.Gui; tắt = hoạt động lại
-    local antiBtn, refreshAnti = makeToggle(234, "ANTI-STATIC", function() return SET.antiStatic end)
+    local antiBtn, refreshAnti = makeToggle(534, "ANTI-STATIC", function() return SET.antiStatic end)
     antiBtn.MouseButton1Click:Connect(function()
         if SET.setAntiStatic then SET.setAntiStatic(not SET.antiStatic) end
         refreshAnti()
@@ -565,10 +761,9 @@ do
     end)
 
     -- Đánh dấu ô còn sót: bật / tắt thanh Here, riêng với ESP
-    local markBtn, refreshMark = makeToggle(260, "MARK LEFTOVER", function() return SET.markLeftover end)
+    local markBtn, refreshMark = makeToggle(560, "MARK LEFTOVER", function() return SET.markLeftover end)
     markBtn.MouseButton1Click:Connect(function()
         SET.markLeftover = not SET.markLeftover
-        -- bật: khởi động bộ giải dùng chung nếu cần; tắt: dừng nó nếu không còn tính năng nào cần
         if requestEngine and not requestEngine() then
             SET.markLeftover = false
         end
@@ -576,27 +771,157 @@ do
         SET.queueSave()
     end)
 
-    -- Lưu / đặt lại
-    local saveBtn = makeButton(8, 308, 90, "Save now", Color3.fromRGB(0, 255, 0))
-    saveBtn.MouseButton1Click:Connect(function() SET.save() end)
-
-    local reset = makeButton(102, 308, 90, "Reset defaults", Color3.fromRGB(255, 170, 0))
-    reset.MouseButton1Click:Connect(function()
-        for key, v in pairs(DEFAULTS) do SET[key] = v end
-        refreshBoxes()
+    -- Khung thời gian (ms)
+    local msBtn, refreshMs = makeToggle(586, "SHOW PERF (ms)", function() return SET.showMs end)
+    msBtn.MouseButton1Click:Connect(function()
+        SET.showMs = not SET.showMs
+        SET.applyAll()
+        refreshMs()
         SET.queueSave()
     end)
 
-    SET.msgLabel = makeLabel(SET.saveMsg, 8, 334, 184, 16, Color3.fromRGB(170, 220, 255), 11)
+    -- Lưu / đặt lại
+    local saveBtn = makeButton(8, 636, 90, "Save now", Color3.fromRGB(0, 255, 0))
+    saveBtn.MouseButton1Click:Connect(function() SET.save() end)
+
+    local function refreshCycles()
+        refreshStyle(); refreshMine(); refreshSafe(); refreshGuess()
+    end
+
+    local reset = makeButton(102, 636, 90, "Reset defaults", Color3.fromRGB(255, 170, 0))
+    reset.MouseButton1Click:Connect(function()
+        for key, v in pairs(DEFAULTS) do SET[key] = v end
+        refreshBoxes()
+        refreshCycles()
+        SET.applyAll()
+        if SET.espChanged then SET.espChanged() end
+        SET.queueSave()
+    end)
+
+    -- Đưa menu / khung ms về vị trí mặc định (phòng khi bị lọt khỏi tầm thao tác)
+    local resetPos = makeButton(8, 662, 184, "Reset GUI position", Color3.fromRGB(255, 170, 0))
+    resetPos.MouseButton1Click:Connect(function()
+        mainFrame.Position = SET.defaultMenuPos
+        if SET.msFrame then SET.msFrame.Position = SET.defaultMsPos end
+        SET.menuFx, SET.menuFy, SET.msFx, SET.msFy = nil, nil, nil, nil
+        task.defer(function()
+            SET.clampTarget(mainFrame)
+            if SET.msFrame then SET.clampTarget(SET.msFrame) end
+        end)
+        SET.queueSave()
+    end)
+
+    SET.msgLabel = makeLabel(SET.saveMsg, 8, 690, 184, 16, Color3.fromRGB(170, 220, 255), 11)
 
     SET.refreshUI = function()
         refreshBoxes()
+        refreshCycles()
         refreshNoStep()
         refreshAnti()
         refreshMark()
+        refreshMs()
     end
 
     refreshBoxes()
+end
+
+-- Khung thời gian (ms): kéo thả được, đổi kích thước bằng tay nắm ở góc dưới phải (hoặc ô nhập trong Settings)
+do
+    local f = Instance.new("Frame")
+    f.Name = "PerfBox"
+    f.Parent = screenGui
+    f.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    f.BackgroundTransparency = 0.25
+    f.BorderSizePixel = 0
+    f.Size = UDim2.new(0, SET.msW, 0, SET.msH)
+    SET.defaultMsPos = UDim2.new(1, -(SET.msW + 12), 0, 60)
+    f.Position = SET.defaultMsPos
+    f.Active = true
+    f.Visible = SET.showMs
+    SET.msFrame = f
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Parent = f
+    lbl.BackgroundTransparency = 1
+    lbl.Position = UDim2.new(0, 6, 0, 3)
+    lbl.Size = UDim2.new(1, -26, 1, -6)
+    lbl.Text = "..."
+    lbl.TextColor3 = Color3.fromRGB(170, 255, 170)
+    lbl.Font = Enum.Font.Code
+    lbl.TextScaled = true
+    lbl.TextWrapped = true
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.TextYAlignment = Enum.TextYAlignment.Top
+    lbl.BorderSizePixel = 0
+
+    makeDraggable(f, f, nil, function() SET.queueSave() end)
+
+    local grip = Instance.new("TextButton")
+    grip.Parent = f
+    grip.AnchorPoint = Vector2.new(1, 1)
+    grip.Position = UDim2.new(1, 0, 1, 0)
+    grip.Size = UDim2.new(0, 22, 0, 22)
+    grip.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    grip.TextColor3 = Color3.fromRGB(255, 255, 255)
+    grip.Font = Enum.Font.GothamBold
+    grip.TextSize = 14
+    grip.Text = "+"
+    grip.AutoButtonColor = true
+    grip.BorderSizePixel = 0
+
+    local resizing, startW, startH, startPt = false, 0, 0, nil
+
+    grip.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            resizing = true
+            SET.resizing = true
+            startW, startH = f.Size.X.Offset, f.Size.Y.Offset
+            startPt = input.Position
+
+            local conn
+            conn = input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    resizing = false
+                    SET.resizing = false
+                    conn:Disconnect()
+                    SET.msW = math.floor(f.Size.X.Offset + 0.5)
+                    SET.msH = math.floor(f.Size.Y.Offset + 0.5)
+                    SET.clampTarget(f)
+                    if SET.refreshUI then SET.refreshUI() end
+                    SET.queueSave()
+                end
+            end)
+        end
+    end)
+
+    table.insert(uiConns, UserInputService.InputChanged:Connect(function(input)
+        if not resizing then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement
+            and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+        local d = input.Position - startPt
+        local w = math.clamp(startW + d.X, SET.limits.msW[1], SET.limits.msW[2])
+        local h = math.clamp(startH + d.Y, SET.limits.msH[1], SET.limits.msH[2])
+        f.Size = UDim2.new(0, w, 0, h)
+    end))
+
+    -- Cập nhật nội dung 4 lần mỗi giây (dừng khi GUI bị huỷ)
+    task.spawn(function()
+        while f.Parent do
+            if f.Visible then
+                lbl.Text = SET.perfText and SET.perfText() or "..."
+            end
+            task.wait(0.25)
+        end
+    end)
+
+    -- Xoay màn hình / đổi kích thước cửa sổ -> kéo các khung về lại trong màn hình
+    table.insert(uiConns, screenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+        SET.clampTarget(mainFrame)
+        SET.clampTarget(f)
+    end))
 end
 
 gearBtn.MouseButton1Click:Connect(function()
@@ -1239,12 +1564,12 @@ local function updateHerePillar(charPos, foundMinesCount)
             if d < safeD then safeT, safeD = part, d end
         end
     end
-    hereSet("safe", safeT, Color3.fromRGB(0, 255, 0))
+    hereSet("safe", safeT, SET.colorFor("Safe_Highlight", Color3.fromRGB(0, 255, 0)))
 
     -- 2) Ô đoán (vàng)
     local g = currentBestGuess
     if g and g.Parent and isUnrevealed(g) and not knownMines[g] and not knownSafe[g] then
-        hereSet("guess", g, Color3.fromRGB(255, 255, 0))
+        hereSet("guess", g, SET.colorFor("Guess_Highlight", Color3.fromRGB(255, 255, 0)))
     else
         hereRemove("guess")
     end
@@ -1320,6 +1645,8 @@ local function createHighlight(part, color, name)
     local ex = trackedVisuals[part]
     if ex and ex.tag == name and ex.topFill and ex.topFill.Parent then return end
 
+    color = SET.colorFor(name, color) -- màu ESP chỉnh trong Settings
+
     local charPos = getCharPos()
     if not withinVisualRange(part, charPos) then
         clearVisuals(part)
@@ -1348,7 +1675,7 @@ local function createHighlight(part, color, name)
     topFill.Massless = true
     topFill.Material = Enum.Material.SmoothPlastic
     topFill.Color = color
-    topFill.Transparency = 0.45
+    topFill.Transparency = (SET.espStyle == 2) and 1 or 0.45 -- kiểu 2 = chỉ viền
     topFill.Size = Vector3.new(
         math.max(0.1, part.Size.X * 0.96),
         capThickness,
@@ -1362,7 +1689,7 @@ local function createHighlight(part, color, name)
     box.Adornee = topFill
     box.Color3 = color
     box.LineThickness = 0.04
-    box.Transparency = 0.05
+    box.Transparency = (SET.espStyle == 3) and 1 or 0.05 -- kiểu 3 = chỉ tô
     box.SurfaceTransparency = 1
     box.Parent = visualsFolder
 
@@ -2633,6 +2960,23 @@ function SET.flagNote(part)
     end
 end
 
+-- Đổi màu / kiểu ESP: xoá ESP cũ để vẽ lại ngay
+function SET.espChanged()
+    clearAllVisuals()
+    lastSig = nil
+end
+
+-- Số đo thời gian (ms, làm mượt) hiển thị ở khung PERF
+SET.perf = { tick = 0, solve = 0, scan = 0 }
+
+function SET.perfText()
+    if not isScanning then return "Engine off" end
+    local pf = SET.perf
+    return string.format("Tick %.1f ms\nSolve %.1f | Scan %.1f\nParts %d | %s",
+        pf.tick, pf.solve, pf.scan, #cachedParts,
+        isEndlessOn and (isAntiLagOn and "Endless-AL" or "Endless") or "Normal")
+end
+
 local lastFlagRefresh = 0
 local lastStatusText = ""
 
@@ -2714,6 +3058,7 @@ local function solverTick()
 
     local unrevCount, numCount, staleNumbers = 0, 0, 0
     local changedAny = false
+    local scanStart = os.clock()
 
     if isEndlessOn then
         -- Quét theo lát có ngân sách thời gian, vòng tròn qua danh sách (không quét cả cửa sổ mỗi tick)
@@ -2790,6 +3135,8 @@ local function solverTick()
         for i = writeIndex, #cachedParts do cachedParts[i] = nil end
     end
 
+    SET.perf.scan = SET.perf.scan * 0.8 + (os.clock() - scanStart) * 1000 * 0.2
+
     if staleNumbers >= 3 then
         hardResetKnowledge()
         return
@@ -2811,7 +3158,9 @@ local function solverTick()
     local solved = false
     local forceInt = isEndlessOn and prof.forceSolve or FORCE_SOLVE_INTERVAL
     if sig ~= lastSig or now - lastSolveTime >= forceInt then
+        local solveStart = os.clock()
         solveBoard(charPos, isEndlessOn and (os.clock() + prof.solveBudget) or nil)
+        SET.perf.solve = SET.perf.solve * 0.8 + (os.clock() - solveStart) * 1000 * 0.2
         lastSig = sig
         lastSolveTime = now
         solved = true
@@ -2868,7 +3217,9 @@ local function startSolverLoop()
             end
             -- Tự giãn nhịp: tick nặng thì nghỉ lâu hơn để không chiếm quá ~40% CPU
             local base = isEndlessOn and EL.prof().tick or LOOP_INTERVAL
-            task.wait(math.max(base, (os.clock() - t0) * 1.5))
+            local dt = os.clock() - t0
+            SET.perf.tick = SET.perf.tick * 0.8 + dt * 1000 * 0.2
+            task.wait(math.max(base, dt * 1.5))
         end
         clearHerePillar()
     end)
@@ -3320,6 +3671,18 @@ env.__MS_CLEANUP = destroyAll
 
 -- Khởi tạo: nạp cài đặt đã lưu rồi áp dụng các tính năng đang bật (MARK LEFTOVER mặc định BẬT)
 SET.load()
+SET.refreshUI()
+SET.applyAll()
+if SET.collapsed then setCollapsed(true) end
+-- Đặt lại vị trí đã lưu sau khi bố cục màn hình đã sẵn sàng (luôn kẹp lại trong màn hình)
+task.defer(function()
+    task.wait(0.2)
+    SET.place(mainFrame, "menuFx", "menuFy")
+    if SET.msFrame then SET.place(SET.msFrame, "msFx", "msFy") end
+    SET.clampTarget(mainFrame)
+    if SET.msFrame then SET.clampTarget(SET.msFrame) end
+    SET.ready = true
+end)
 if SET.antiStatic then SET.setAntiStatic(true) end
 if SET.markLeftover or SET.noStep then
     task.defer(function()
