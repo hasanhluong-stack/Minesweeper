@@ -1,4 +1,5 @@
--- V8.5
+-- V9
+-- Turn Endless
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -52,7 +53,7 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 screenGui.Parent = guiParent
 
 -- GUI: thanh tiêu đề (kéo thả) + thân (nút) + icon nổi để ẩn/hiện
-local PANEL_W, TITLE_H, BODY_H = 200, 26, 170
+local PANEL_W, TITLE_H, BODY_H = 200, 26, 212
 local DRAG_THRESHOLD = 6
 local MENU_EDGE_SLACK = 6          -- cho menu lấn nhẹ ra mép trái/phải/dưới để chạm viền
 local MENU_TOP_EXTRA = 10          -- nâng mép trên thêm ngần này px (tăng nếu muốn lên cao hơn)
@@ -188,6 +189,87 @@ antiLagNoteLabel.Font = Enum.Font.SourceSansBold
 antiLagNoteLabel.BorderSizePixel = 0
 
 local destroyBtn = createButton("DestroyBtn", "Destroy UI", 8, 146, 184, 20, Color3.fromRGB(255, 100, 100))
+
+-- Link: tiêu đề "Link" ở giữa, bên dưới là URL (hiện rút gọn bằng "..." khi không đủ chỗ) và nút copy.
+-- URL đầy đủ nằm sẵn trong script; nút copy đặt ĐỦ URL vào clipboard.
+do
+    local LINK = "https://scriptblox.com/script/bLockermans-Minesweeper-Auto-open-solution-Remake-Update-237597"
+
+    local title = Instance.new("TextLabel")
+    title.Name = "LinkTitle"
+    title.Parent = body
+    title.BackgroundTransparency = 1
+    title.Position = UDim2.new(0, 8, 0, 170)
+    title.Size = UDim2.new(0, 184, 0, 14)
+    title.Text = "Link"
+    title.TextColor3 = Color3.fromRGB(255, 220, 100)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 12
+    title.TextXAlignment = Enum.TextXAlignment.Center
+    title.BorderSizePixel = 0
+    title:SetAttribute("Role", "header")
+
+    local urlBox = Instance.new("TextLabel")
+    urlBox.Name = "LinkUrl"
+    urlBox.Parent = body
+    urlBox.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    urlBox.Position = UDim2.new(0, 8, 0, 186)
+    urlBox.Size = UDim2.new(0, 152, 0, 20)
+    urlBox.Text = " " .. LINK
+    urlBox.TextColor3 = Color3.fromRGB(170, 220, 255)
+    urlBox.Font = Enum.Font.Gotham
+    urlBox.TextSize = 11
+    urlBox.TextXAlignment = Enum.TextXAlignment.Left
+    urlBox.TextTruncate = Enum.TextTruncate.AtEnd
+    urlBox.BorderSizePixel = 0
+
+    local copyBtn = Instance.new("TextButton")
+    copyBtn.Name = "LinkCopy"
+    copyBtn.Parent = body
+    copyBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    copyBtn.Position = UDim2.new(0, 164, 0, 186)
+    copyBtn.Size = UDim2.new(0, 28, 0, 20)
+    copyBtn.Text = ""
+    copyBtn.AutoButtonColor = true
+    copyBtn.BorderSizePixel = 0
+
+    -- Biểu tượng copy: hai tờ giấy chồng nhau (tờ sau chỉ có viền, tờ trước đặc)
+    local back = Instance.new("Frame")
+    back.Name = "IcoCopyBack"
+    back.Parent = copyBtn
+    back.BackgroundTransparency = 1
+    back.Position = UDim2.new(0, 8, 0, 3)
+    back.Size = UDim2.new(0, 9, 0, 11)
+    back.BorderSizePixel = 0
+    local stroke = Instance.new("UIStroke")
+    stroke.Name = "IcoStroke"
+    stroke.Color = Color3.fromRGB(255, 255, 255)
+    stroke.Thickness = 1.5
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Parent = back
+
+    local front = Instance.new("Frame")
+    front.Name = "IcoCopyFront"
+    front.Parent = copyBtn
+    front.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    front.Position = UDim2.new(0, 12, 0, 6)
+    front.Size = UDim2.new(0, 9, 0, 11)
+    front.BorderSizePixel = 0
+
+    local token = 0
+    copyBtn.MouseButton1Click:Connect(function()
+        local fn = (type(setclipboard) == "function" and setclipboard)
+            or (type(toclipboard) == "function" and toclipboard) or nil
+        local ok = fn ~= nil and pcall(fn, LINK)
+
+        token = token + 1
+        local mine = token
+        urlBox.Text = ok and " Link copied!" or " Copy not supported here"
+        task.delay(1.4, function()
+            if mine == token then urlBox.Text = " " .. LINK end
+        end)
+    end)
+end
 
 -- Icon nổi (kéo được, chạm để ẩn/hiện bảng)
 local iconBtn = Instance.new("TextButton")
@@ -571,9 +653,15 @@ SET.themes = {
     { name = "Default", panel = Color3.fromRGB(45, 45, 45), title = Color3.fromRGB(28, 28, 28), titleText = Color3.fromRGB(255, 255, 255),
       btn = Color3.fromRGB(60, 60, 60), label = Color3.fromRGB(255, 255, 255), header = Color3.fromRGB(255, 220, 100),
       info = Color3.fromRGB(170, 220, 255), warn = Color3.fromRGB(255, 220, 100), note = Color3.fromRGB(255, 170, 100) },
-    { name = "Windows Standard Demo", panel = Color3.fromRGB(192, 192, 192), title = Color3.fromRGB(0, 0, 128), titleText = Color3.fromRGB(255, 255, 255),
-      btn = Color3.fromRGB(96, 96, 96), label = Color3.fromRGB(0, 0, 0), header = Color3.fromRGB(0, 0, 128),
-      info = Color3.fromRGB(0, 64, 128), warn = Color3.fromRGB(128, 0, 0), note = Color3.fromRGB(128, 64, 0) },
+    -- Windows Standard (kiểu Windows 95/98): nền xám ButtonFace, viền nổi / chìm 2 lớp, thanh tiêu đề gradient navy -> xanh nhạt,
+    -- chữ đen font Arial, ô nhập nền trắng chìm.
+    { name = "Windows Standard", light = true, bevel = true, gradient = true,
+      font = Enum.Font.Arial, fontBold = Enum.Font.ArialBold,
+      panel = Color3.fromRGB(192, 192, 192), title = Color3.fromRGB(0, 0, 128), titleText = Color3.fromRGB(255, 255, 255),
+      btn = Color3.fromRGB(192, 192, 192), boxBg = Color3.fromRGB(255, 255, 255), boxText = Color3.fromRGB(0, 0, 0),
+      label = Color3.fromRGB(0, 0, 0), header = Color3.fromRGB(0, 0, 128), info = Color3.fromRGB(0, 0, 160),
+      warn = Color3.fromRGB(128, 0, 0), note = Color3.fromRGB(128, 64, 0), scroll = Color3.fromRGB(128, 128, 128),
+      icon = Color3.fromRGB(0, 0, 0), iconActive = Color3.fromRGB(0, 0, 128) },
     { name = "Midnight", panel = Color3.fromRGB(18, 22, 38), title = Color3.fromRGB(10, 12, 24), titleText = Color3.fromRGB(220, 230, 255),
       btn = Color3.fromRGB(40, 48, 84), label = Color3.fromRGB(230, 235, 255), header = Color3.fromRGB(120, 180, 255),
       info = Color3.fromRGB(150, 200, 255), warn = Color3.fromRGB(255, 210, 120), note = Color3.fromRGB(255, 170, 120) },
@@ -595,34 +683,186 @@ SET.themes = {
 }
 
 -- Tô màu menu theo theme. Chỉ đổi NỀN và các nhãn trung tính (theo Role); màu ý nghĩa (xanh ON / đỏ OFF...) giữ nguyên.
-function SET.applyTheme()
-    local th = SET.themes[SET.theme] or SET.themes[1]
+-- Chữ "ý nghĩa" (xanh ON / đỏ OFF / cam...) trên nút và nhãn có nền: ở theme sáng được tối đi để dễ đọc.
+-- Màu gốc do code đặt luôn được nhớ lại (SET.tc) nên đổi sang theme khác là khôi phục đúng màu.
+SET.tc = setmetatable({}, { __mode = "k" })
+SET.fontOrig = setmetatable({}, { __mode = "k" })
+SET.winLight = false
+SET.adjusting = false
 
-    mainFrame.BackgroundColor3 = th.panel
-    titleBar.BackgroundColor3 = th.title
-    titleLabel.TextColor3 = th.titleText
-    flagWarningLabel.TextColor3 = th.warn
-    antiLagNoteLabel.TextColor3 = th.note
-    if SET.page then SET.page.ScrollBarImageColor3 = th.header end
-    if SET.helpPage then SET.helpPage.ScrollBarImageColor3 = th.header end
+function SET.darken(c)
+    if c.R > 0.9 and c.G > 0.9 and c.B > 0.9 then return Color3.new(0, 0, 0) end
+    return Color3.new(c.R * 0.45, c.G * 0.45, c.B * 0.45)
+end
 
-    for _, d in ipairs(mainFrame:GetDescendants()) do
-        local role = d:GetAttribute("Role")
-        if role then
-            if th[role] then d.TextColor3 = th[role] end
-        elseif d:IsA("GuiObject") and d.BackgroundTransparency < 1 then
+function SET.hookText(inst)
+    if SET.tc[inst] then return end
+    SET.tc[inst] = inst.TextColor3
+    inst:GetPropertyChangedSignal("TextColor3"):Connect(function()
+        if SET.adjusting then return end
+        SET.tc[inst] = inst.TextColor3 -- code vừa đặt màu mới
+        if SET.winLight then
+            SET.adjusting = true
+            inst.TextColor3 = SET.darken(inst.TextColor3)
+            SET.adjusting = false
+        end
+    end)
+end
+
+-- Viền 3D kiểu Windows cổ điển (2 lớp): nổi cho nút / cửa sổ, chìm cho ô nhập / thanh trạng thái.
+-- Chỉ được tạo lần đầu khi chọn theme Windows Standard; theme khác thì ẩn đi.
+function SET.setBevel(on)
+    if on and not SET.bevels then
+        SET.bevels = {}
+
+        local function edge(list, obj, pos, size, color)
+            local f = Instance.new("Frame")
+            f.Name = "IcoBevel"
+            f.BorderSizePixel = 0
+            f.BackgroundColor3 = color
+            f.Position = pos
+            f.Size = size
+            f.ZIndex = obj.ZIndex + 1
+            f.Parent = obj
+            list[#list + 1] = f
+        end
+
+        local function addBevel(obj, sunken)
+            local list = {}
+            local white, light, grey, black = Color3.fromRGB(255, 255, 255), Color3.fromRGB(223, 223, 223),
+                Color3.fromRGB(128, 128, 128), Color3.fromRGB(0, 0, 0)
+            local outerTL, innerTL, outerBR, innerBR = white, light, black, grey
+            if sunken then outerTL, innerTL, outerBR, innerBR = grey, black, white, light end
+
+            edge(list, obj, UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 0, 1), outerTL)   -- trên (ngoài)
+            edge(list, obj, UDim2.new(0, 0, 0, 0), UDim2.new(0, 1, 1, 0), outerTL)   -- trái (ngoài)
+            edge(list, obj, UDim2.new(0, 1, 0, 1), UDim2.new(1, -2, 0, 1), innerTL)  -- trên (trong)
+            edge(list, obj, UDim2.new(0, 1, 0, 1), UDim2.new(0, 1, 1, -2), innerTL)  -- trái (trong)
+            edge(list, obj, UDim2.new(0, 1, 1, -2), UDim2.new(1, -2, 0, 1), innerBR) -- dưới (trong)
+            edge(list, obj, UDim2.new(1, -2, 0, 1), UDim2.new(0, 1, 1, -2), innerBR) -- phải (trong)
+            edge(list, obj, UDim2.new(0, 0, 1, -1), UDim2.new(1, 0, 0, 1), outerBR)  -- dưới (ngoài)
+            edge(list, obj, UDim2.new(1, -1, 0, 0), UDim2.new(0, 1, 1, 0), outerBR)  -- phải (ngoài)
+            SET.bevels[obj] = list
+        end
+
+        addBevel(mainFrame, false)
+        for _, d in ipairs(mainFrame:GetDescendants()) do
             local n = d.Name
-            if n:sub(1, 3) == "Ico" or (d:IsA("ScrollingFrame") and n ~= "DropList") then
-                -- biểu tượng / khung cuộn: giữ nguyên
-            elseif n == "DropBox" or n == "DropList" then
-                d.BackgroundColor3 = Color3.fromRGB(12, 12, 12) -- ô theme luôn đen hơn nền menu
-            elseif n == "DropItem" then
-                d.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-            elseif d:IsA("TextButton") or d:IsA("TextBox") or d:IsA("TextLabel") then
-                d.BackgroundColor3 = th.btn
+            if n:sub(1, 3) ~= "Ico" then
+                if n == "DropBox" then
+                    addBevel(d, true)
+                elseif n:sub(1, 4) ~= "Drop" then
+                    if d:IsA("TextButton") then
+                        addBevel(d, false)
+                    elseif d:IsA("TextBox") then
+                        addBevel(d, true)
+                    elseif d:IsA("TextLabel") and d.BackgroundTransparency < 1 then
+                        addBevel(d, true)
+                    end
+                end
             end
         end
     end
+
+    if SET.bevels then
+        for _, list in pairs(SET.bevels) do
+            for _, f in ipairs(list) do f.Visible = on end
+        end
+    end
+end
+
+-- Tô màu menu theo theme. Đổi NỀN, font, các nhãn trung tính (theo Role) và biểu tượng; chữ ý nghĩa giữ nguyên (xem SET.hookText).
+function SET.applyTheme()
+    local th = SET.themes[SET.theme] or SET.themes[1]
+    SET.winLight = th.light == true
+
+    mainFrame.BackgroundColor3 = th.panel
+
+    -- Thanh tiêu đề: nền phẳng, hoặc gradient navy -> xanh nhạt kiểu Windows 98
+    if not SET.titleGrad then
+        local g = Instance.new("UIGradient")
+        g.Name = "IcoGradient"
+        g.Color = ColorSequence.new(Color3.fromRGB(0, 0, 128), Color3.fromRGB(16, 132, 208))
+        g.Enabled = false
+        g.Parent = titleBar
+        SET.titleGrad = g
+    end
+    if th.gradient then
+        titleBar.BackgroundColor3 = Color3.new(1, 1, 1)
+        SET.titleGrad.Enabled = true
+    else
+        titleBar.BackgroundColor3 = th.title
+        SET.titleGrad.Enabled = false
+    end
+
+    flagWarningLabel.TextColor3 = th.warn
+    antiLagNoteLabel.TextColor3 = th.note
+    local scrollColor = th.scroll or th.header
+    if SET.page then SET.page.ScrollBarImageColor3 = scrollColor end
+    if SET.helpPage then SET.helpPage.ScrollBarImageColor3 = scrollColor end
+
+    SET.setBevel(th.bevel == true)
+
+    local iconColor = th.icon or Color3.fromRGB(255, 255, 255)
+    local white = Color3.fromRGB(255, 255, 255)
+
+    for _, d in ipairs(mainFrame:GetDescendants()) do
+        local n = d.Name
+        if n:sub(1, 3) == "Ico" then
+            if n == "IcoStroke" then
+                d.Color = iconColor
+            elseif n == "IcoCopyFront" then
+                d.BackgroundColor3 = iconColor
+            end
+        else
+            local isText = d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox")
+            local isDrop = n:sub(1, 4) == "Drop"
+
+            -- Font (Windows Standard dùng Arial; theme khác trả về font gốc)
+            if isText and not isDrop then
+                local orig = SET.fontOrig[d]
+                if not orig then
+                    orig = d.Font
+                    SET.fontOrig[d] = orig
+                end
+                if th.font then
+                    local bold = orig == Enum.Font.GothamBold or orig == Enum.Font.SourceSansBold or orig == Enum.Font.ArialBold
+                    d.Font = bold and th.fontBold or th.font
+                else
+                    d.Font = orig
+                end
+            end
+
+            local role = d:GetAttribute("Role")
+            if role then
+                if th[role] then d.TextColor3 = th[role] end
+            elseif d:IsA("GuiObject") and d.BackgroundTransparency < 1 then
+                if d:IsA("ScrollingFrame") and n ~= "DropList" then
+                    -- khung cuộn: giữ nguyên
+                elseif n == "DropBox" or n == "DropList" then
+                    d.BackgroundColor3 = Color3.fromRGB(12, 12, 12) -- ô theme luôn đen hơn nền menu
+                elseif n == "DropItem" then
+                    d.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+                elseif d:IsA("TextBox") then
+                    d.BackgroundColor3 = th.boxBg or th.btn
+                    d.TextColor3 = th.boxText or white
+                elseif d:IsA("TextButton") or d:IsA("TextLabel") then
+                    d.BackgroundColor3 = th.btn
+                end
+
+                -- chữ ý nghĩa trên nút / nhãn có nền: nhớ màu gốc, tối đi ở theme sáng
+                if isText and not isDrop and not d:IsA("TextBox") then
+                    SET.hookText(d)
+                    SET.adjusting = true
+                    d.TextColor3 = SET.winLight and SET.darken(SET.tc[d]) or SET.tc[d]
+                    SET.adjusting = false
+                end
+            end
+        end
+    end
+
+    titleLabel.TextColor3 = th.titleText
+    if SET.refreshTitleIcons then SET.refreshTitleIcons() end
 end
 
 function SET.applyAll()
@@ -1109,6 +1349,7 @@ do
         "- ENDLESS: for the endless board. Only the tiles around you are loaded and solved, and the global mine-count rules are off.",
         "- AUTO OPEN: touches sure safe tiles to open them. Speed comes from Open delay and Open batch.",
         "- Destroy UI: stops everything, restores every property the script changed and removes the menu.",
+        "- Link row (bottom): shows the project link, shortened with ... when it does not fit. The copy button puts the FULL link on your clipboard (needs an executor that has setclipboard).",
         "- Status line: current mode, mines known / total, safe tiles found and tiles scanned.",
         "",
         "<b>SETTINGS</b>",
@@ -1121,7 +1362,7 @@ do
         "- Here at mines: the Here pillars appear only after this many mines are known.",
         "",
         "<b>INTERFACE</b>",
-        "- Theme: the black box with an arrow. Tap it to open a scrollable list of themes (Default, Windows Standard and more).",
+        "- Theme: the black box with an arrow. Tap it to open a scrollable list of themes (Default, Windows Standard and more). Windows Standard imitates the classic Windows look: grey bevelled buttons, white sunken text boxes, a blue gradient title bar and Arial text.",
         "- UI scale: size of the menu. Transparency: how see-through it is.",
         "- Perf width / height: size of the ms box. You can also drag its + corner.",
         "",
@@ -1246,12 +1487,16 @@ end
 
 -- Tô sáng nút đang mở trang (bánh răng / quyển sách)
 local function refreshTitleIcons()
-    gearBtn.TextColor3 = SET.open and Color3.fromRGB(255, 220, 100) or Color3.fromRGB(255, 255, 255)
-    local c = SET.helpOpen and Color3.fromRGB(255, 220, 100) or Color3.fromRGB(255, 255, 255)
+    local th = SET.themes[SET.theme] or SET.themes[1]
+    local normal = th.icon or Color3.fromRGB(255, 255, 255)
+    local active = th.iconActive or Color3.fromRGB(255, 220, 100)
+    gearBtn.TextColor3 = SET.open and active or normal
+    local c = SET.helpOpen and active or normal
     for _, ch in ipairs(helpBtn:GetChildren()) do
         if ch.Name == "IcoPage" then ch.BackgroundColor3 = c end
     end
 end
+SET.refreshTitleIcons = refreshTitleIcons
 
 gearBtn.MouseButton1Click:Connect(function()
     if collapsed then setCollapsed(false) end
@@ -3282,24 +3527,38 @@ function SET.setAntiStatic(on)
     end)
 end
 
--- Chống bấm lặp: một ô chỉ được bấm cờ tối đa 2 lần trong 10 giây (phòng khi không nhận ra cờ làm cờ bật / tắt liên tục)
-SET.flagClicks = setmetatable({}, { __mode = "k" })
+-- Bấm lại một ô khi lần bấm trước KHÔNG có tác dụng (server bỏ qua / bấm trượt): chờ 0.7s, rồi 1.2s, rồi 2s.
+-- Sau 4 lần mà vẫn chưa đổi được thì nghỉ 8s (tránh bật / tắt cờ liên tục khi không nhận ra cờ).
+-- (Trước đây mọi ô bị chặn cứng 2s sau mỗi lần bấm nên ô bị bỏ lỡ phải chờ rất lâu mới được đặt lại.)
+SET.flagTries = setmetatable({}, { __mode = "k" })
+SET.retryGaps = { 0.7, 1.2, 2.0 }
 
-function SET.flagAllowed(part)
-    local rec = SET.flagClicks[part]
+function SET.flagReady(part, kind)
+    local rec = SET.flagTries[part]
     if not rec then return true end
-    if os.clock() - rec.t0 > 10 then return true end
-    return rec.n < 2
+    local now = os.clock()
+    if rec.kind ~= kind or now - rec.t > 12 then
+        SET.flagTries[part] = nil
+        return true
+    end
+    if rec.blockUntil then
+        if now < rec.blockUntil then return false end
+        SET.flagTries[part] = nil
+        return true
+    end
+    return now - rec.t >= SET.retryGaps[math.min(rec.n, #SET.retryGaps)]
 end
 
-function SET.flagNote(part)
+function SET.flagNote(part, kind)
     local now = os.clock()
-    local rec = SET.flagClicks[part]
-    if rec and now - rec.t0 <= 10 then
-        rec.n = rec.n + 1
-    else
-        SET.flagClicks[part] = { n = 1, t0 = now }
+    local rec = SET.flagTries[part]
+    if not rec or rec.kind ~= kind or now - rec.t > 12 then
+        rec = { kind = kind, n = 0, t = now }
+        SET.flagTries[part] = rec
     end
+    rec.n = rec.n + 1
+    rec.t = now
+    if rec.n >= 4 then rec.blockUntil = now + 8 end
 end
 
 -- Đổi màu / kiểu ESP: xoá ESP cũ để vẽ lại ngay
@@ -3789,7 +4048,7 @@ autoFlagBtn.MouseButton1Click:Connect(function()
                 local misplaced = {}
                 for part in pairs(knownSafe) do
                     if part.Parent and isUnrevealed(part) and hasFlag(part)
-                        and not onCooldown(part, 2.0) and SET.flagAllowed(part) and isMarkConfirmed(part)
+                        and SET.flagReady(part, "unflag") and isMarkConfirmed(part)
                         and isWithinDistance(part, charPos, SET.actRange) then
                         misplaced[#misplaced + 1] = part
                     end
@@ -3802,12 +4061,14 @@ autoFlagBtn.MouseButton1Click:Connect(function()
                         and isWithinDistance(part, latest, SET.actRange) then
                         clickTile(part)
                         stamp(part)
-                        SET.flagNote(part)
+                        SET.flagNote(part, "unflag")
                         didWork = true
                         sinceWait = sinceWait + 1
                         if sinceWait >= SET.flagBatch then
                             sinceWait = 0
                             task.wait(SET.flagDelay)
+                        else
+                            task.wait() -- các cờ trong cùng một lô cách nhau một frame (tránh bị server bỏ qua vì gửi dồn)
                         end
                     end
                 end
@@ -3816,7 +4077,7 @@ autoFlagBtn.MouseButton1Click:Connect(function()
                 local toFlag = {}
                 for part in pairs(knownMines) do
                     if part.Parent and isUnrevealed(part) and not hasFlag(part)
-                        and not onCooldown(part, 2.0) and SET.flagAllowed(part) and isMarkConfirmed(part)
+                        and SET.flagReady(part, "flag") and isMarkConfirmed(part)
                         and isWithinDistance(part, charPos, SET.actRange) then
                         toFlag[#toFlag + 1] = part
                     end
@@ -3829,12 +4090,14 @@ autoFlagBtn.MouseButton1Click:Connect(function()
                         and isWithinDistance(part, latest, SET.actRange) then
                         clickTile(part)
                         stamp(part)
-                        SET.flagNote(part)
+                        SET.flagNote(part, "flag")
                         didWork = true
                         sinceWait = sinceWait + 1
                         if sinceWait >= SET.flagBatch then
                             sinceWait = 0
                             task.wait(SET.flagDelay)
+                        else
+                            task.wait() -- các cờ trong cùng một lô cách nhau một frame (tránh bị server bỏ qua vì gửi dồn)
                         end
                     end
                 end
