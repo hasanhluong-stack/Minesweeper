@@ -1635,7 +1635,7 @@ local ENDLESS_GUESS_OUTSIDE = false   -- false: Endless chỉ đoán trên ô bi
 local CONFIRM_DELAY = 0.2             -- (Endless) ô mìn/an toàn phải tồn tại >= 0.2s mới được auto touch
 local ENDLESS_DEFAULT_DENSITY = 0.2   -- xác suất mìn ước lượng cho ô chưa có thông tin
 
-local isEndlessOn = true
+local isEndlessOn = false
 local endlessLastCenter = nil
 local endlessTileDim = 8
 local customUnrevealed = nil           -- màu ô chưa mở đã học thêm (Endless), dùng song song với màu mặc định
@@ -1824,7 +1824,7 @@ end
 -- Cả chế độ thường và Endless: Anti-Lag OFF = 100 studs, ON = 60 studs.
 -- Không dùng suy luận tổng mìn toàn bàn khi chỉ quét một vùng giới hạn.
 local function isRangeLimited()
-    return true
+    return isEndlessOn or isAntiLagOn
 end
 
 local function getRangeLimit()
@@ -3647,7 +3647,7 @@ function SET.flagNote(part, kind)
     end
     rec.n = rec.n + 1
     rec.t = now
-    if rec.n >= 4 then rec.blockUntil = now + 8 end
+    if rec.n >= 4 then rec.blockUntil = now + 2.5 end
 end
 
 -- Đổi màu / kiểu ESP: xoá ESP cũ để vẽ lại ngay
