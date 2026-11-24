@@ -200,7 +200,7 @@ do
     title.BackgroundTransparency = 1
     title.Position = UDim2.new(0, 8, 0, 170)
     title.Size = UDim2.new(0, 184, 0, 14)
-    title.Text = "Link"
+    title.Text = "Comment"
     title.TextColor3 = Color3.fromRGB(255, 220, 100)
     title.Font = Enum.Font.GothamBold
     title.TextSize = 12
