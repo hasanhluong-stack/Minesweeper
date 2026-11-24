@@ -1,4 +1,4 @@
--- V10.5
+-- V11
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -87,6 +87,7 @@ titleLabel.TextSize = 13
 titleLabel.Font = Enum.Font.GothamBold
 titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 titleLabel.TextTruncate = Enum.TextTruncate.AtEnd
+titleLabel.ZIndex = 2 -- nằm trên lớp bóng kính (IcoGloss) của theme Aero
 
 local function createTitleButton(text, xOffset)
     local b = Instance.new("TextButton")
@@ -100,6 +101,7 @@ local function createTitleButton(text, xOffset)
     b.TextSize = 14
     b.AutoButtonColor = true
     b.BorderSizePixel = 0
+    b.ZIndex = 2
     return b
 end
 
@@ -121,6 +123,7 @@ for _, side in ipairs({ -1, 1 }) do
     pg.Rotation = side * 8
     pg.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     pg.BorderSizePixel = 0
+    pg.ZIndex = 3
 end
 
 local body = Instance.new("Frame")
@@ -192,7 +195,7 @@ local destroyBtn = createButton("DestroyBtn", "Destroy UI", 8, 146, 184, 20, Col
 -- Link: tiêu đề "Link" ở giữa, bên dưới là URL (hiện rút gọn bằng "..." khi không đủ chỗ) và nút copy.
 -- URL đầy đủ nằm sẵn trong script; nút copy đặt ĐỦ URL vào clipboard.
 do
-    local LINK = "https://scriptblox.com/script/bLockermans-Minesweeper-Auto-open-solution-Remake-Update-237597"
+    local LINK = "https://github.com/hasanhluong-stack/Minesweeper/blob/main/Solver.lua"
 
     local title = Instance.new("TextLabel")
     title.Name = "LinkTitle"
@@ -334,7 +337,7 @@ SET.limits = {
     guessColor = { 1, 10, true },
     msW = { 80, 400, true },
     msH = { 24, 200, true },
-    theme = { 1, 8, true },
+    theme = { 1, 9, true },
 }
 SET.boolKeys = { "noStep", "antiStatic", "antiSpike", "markLeftover", "collapsed", "showMs" }
 SET.extraKeys = { "menuFx", "menuFy", "msFx", "msFy" } -- vị trí menu / khung ms (tỉ lệ 0..1 trong vùng trống của màn hình) -- các công tắc được lưu (không lưu ESP / Auto Flag / Auto Open)
@@ -684,6 +687,16 @@ SET.themes = {
     { name = "High Contrast", panel = Color3.fromRGB(0, 0, 0), title = Color3.fromRGB(0, 0, 0), titleText = Color3.fromRGB(255, 255, 0),
       btn = Color3.fromRGB(30, 30, 30), label = Color3.fromRGB(255, 255, 255), header = Color3.fromRGB(255, 255, 0),
       info = Color3.fromRGB(0, 255, 255), warn = Color3.fromRGB(255, 255, 0), note = Color3.fromRGB(255, 128, 0) },
+    -- Windows Aero (kiểu Windows Vista / 7): kính xanh nhạt, bo góc, viền mảnh xanh thép, thanh tiêu đề gradient có lớp bóng kính,
+    -- nút "bóng" (nửa trên sáng, nửa dưới đậm hơn), ô nhập trắng chìm, nút X đỏ, chữ có quầng sáng ở thanh tiêu đề.
+    { name = "Modern Blue", light = true, aero = true, gradient = true,
+      gradA = Color3.fromRGB(96, 165, 226), gradB = Color3.fromRGB(196, 224, 247),
+      font = Enum.Font.SourceSans, fontBold = Enum.Font.SourceSansBold,
+      panel = Color3.fromRGB(205, 224, 244), title = Color3.fromRGB(96, 165, 226), titleText = Color3.fromRGB(8, 28, 58),
+      btn = Color3.fromRGB(232, 242, 252), boxBg = Color3.fromRGB(255, 255, 255), boxText = Color3.fromRGB(8, 28, 58),
+      label = Color3.fromRGB(10, 30, 60), header = Color3.fromRGB(0, 70, 140), info = Color3.fromRGB(0, 80, 160),
+      warn = Color3.fromRGB(150, 50, 0), note = Color3.fromRGB(130, 70, 0), scroll = Color3.fromRGB(90, 140, 195),
+      icon = Color3.fromRGB(50, 90, 140), iconActive = Color3.fromRGB(0, 120, 230), edge = Color3.fromRGB(70, 110, 160) },
 }
 
 -- Tô màu menu theo theme. Chỉ đổi NỀN và các nhãn trung tính (theo Role); màu ý nghĩa (xanh ON / đỏ OFF...) giữ nguyên.
@@ -782,18 +795,110 @@ function SET.setBevel(on)
     end
 end
 
+-- WINDOWS AERO: thay cho viền 3D bằng bo góc (UICorner) + viền mảnh (UIStroke) + gradient dọc kiểu "kính bóng" (UIGradient).
+--   raised = nút (nửa trên sáng, nửa dưới đậm hơn), sunk = ô nhập / nhãn có nền (trắng, tối nhẹ ở mép trên), panel = cả cửa sổ.
+-- Chỉ được tạo lần đầu khi chọn theme Aero; theme khác thì tắt đi (bo góc về 0, viền / gradient tắt).
+SET.aeroList = {}
+SET.aeroBuilt = false
+
+function SET.addAero(obj, kind, store)
+    local radius = (kind == "panel" and 8) or (kind == "raised" and 4) or 3
+    local entry = { radius = radius }
+
+    if obj ~= iconBtn then -- nút MS đã có UICorner riêng (iconCorner), do SET.refreshIcon điều khiển
+        local c = Instance.new("UICorner")
+        c.Name = "IcoAeroCorner"
+        c.CornerRadius = UDim.new(0, 0)
+        c.Parent = obj
+        entry.corner = c
+    end
+
+    local s = Instance.new("UIStroke")
+    s.Name = "IcoAeroStroke"
+    s.Thickness = 1
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    s.Color = Color3.fromRGB(70, 110, 160)
+    s.Enabled = false
+    s.Parent = obj
+    entry.stroke = s
+
+    local g = Instance.new("UIGradient")
+    g.Name = "IcoAeroGrad"
+    g.Rotation = 90
+    g.Enabled = false
+    if kind == "raised" then
+        g.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
+            ColorSequenceKeypoint.new(0.5, Color3.new(0.95, 0.97, 1)),
+            ColorSequenceKeypoint.new(0.51, Color3.new(0.84, 0.91, 1)),
+            ColorSequenceKeypoint.new(1, Color3.new(0.90, 0.95, 1)),
+        })
+    elseif kind == "sunk" then
+        g.Color = ColorSequence.new(Color3.new(0.88, 0.92, 0.97), Color3.new(1, 1, 1))
+    else
+        g.Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.new(0.86, 0.92, 0.99))
+    end
+    g.Parent = obj
+    entry.grad = g
+
+    SET.aeroList[store or obj] = entry
+end
+
+function SET.setAero(th)
+    local on = th.aero == true
+
+    if on and not SET.aeroBuilt then
+        SET.aeroBuilt = true
+
+        SET.addAero(mainFrame, "panel")
+        for _, d in ipairs(mainFrame:GetDescendants()) do
+            local n = d.Name
+            if n:sub(1, 3) ~= "Ico" then
+                if n == "DropBox" then
+                    SET.addAero(d, "sunk")
+                elseif n:sub(1, 4) ~= "Drop" then
+                    if d:IsA("TextButton") then
+                        SET.addAero(d, "raised")
+                    elseif d:IsA("TextBox") then
+                        SET.addAero(d, "sunk")
+                    elseif d:IsA("TextLabel") and d.BackgroundTransparency < 1 then
+                        SET.addAero(d, "sunk")
+                    end
+                end
+            end
+        end
+
+        -- các GUI nhỏ ngoài menu: nút MS, khung ms và tay nắm của nó
+        SET.addAero(iconBtn, "raised")
+        if SET.msFrame then SET.addAero(SET.msFrame, "raised") end
+        if SET.msGrip then SET.addAero(SET.msGrip, "raised") end
+    end
+
+    local edge = th.edge or Color3.fromRGB(70, 110, 160)
+    for _, e in pairs(SET.aeroList) do
+        if e.corner then e.corner.CornerRadius = UDim.new(0, on and e.radius or 0) end
+        e.stroke.Enabled = on
+        e.stroke.Color = edge
+        e.grad.Enabled = on
+    end
+end
+
 -- Nút MS bật / tắt menu: tròn ở các theme thường; Windows Standard = hình vuông xám, viền 3D nổi,
--- chữ đen Arial đậm, và viền CHÌM khi menu đang mở (giống nút "đang nhấn" trên thanh taskbar).
+-- chữ đen Arial đậm, và viền CHÌM khi menu đang mở; Windows Aero = nút kính bo góc, viền xanh sáng khi menu đang mở.
 function SET.refreshIcon()
     local th = SET.themes[SET.theme] or SET.themes[1]
     local visible = mainFrame.Visible
 
-    if th.square then
-        iconCorner.CornerRadius = UDim.new(0, 0)
+    if th.square or th.aero then
+        iconCorner.CornerRadius = UDim.new(0, th.aero and 8 or 0)
         iconBtn.BackgroundColor3 = th.btn
         iconBtn.BackgroundTransparency = 0
         iconBtn.Font = th.fontBold or Enum.Font.GothamBold
-        iconBtn.TextColor3 = th.icon or Color3.fromRGB(0, 0, 0)
+        if th.aero then
+            iconBtn.TextColor3 = visible and (th.iconActive or Color3.fromRGB(0, 120, 230)) or (th.icon or Color3.fromRGB(50, 90, 140))
+        else
+            iconBtn.TextColor3 = th.icon or Color3.fromRGB(0, 0, 0)
+        end
     else
         iconCorner.CornerRadius = UDim.new(0, 19)
         iconBtn.BackgroundColor3 = th.panel
@@ -807,14 +912,20 @@ function SET.refreshIcon()
     local raised, sunk = SET.bevels[iconBtn], SET.bevels.iconSunken
     if raised then for _, f in ipairs(raised) do f.Visible = on and not visible end end
     if sunk then for _, f in ipairs(sunk) do f.Visible = on and visible end end
+
+    local ae = SET.aeroList[iconBtn]
+    if ae and th.aero then
+        ae.stroke.Color = visible and (th.iconActive or Color3.fromRGB(0, 120, 230)) or (th.edge or Color3.fromRGB(70, 110, 160))
+        ae.stroke.Thickness = visible and 2 or 1
+    end
 end
 
--- Khung thời gian (ms): Windows Standard = hộp xám có viền 3D, chữ đen; theme khác = hộp tối chữ xanh như cũ
+-- Khung thời gian (ms): Windows Standard / Aero = hộp sáng, chữ đen; theme khác = hộp tối chữ xanh như cũ
 function SET.applyPerf(th)
     local f, lbl, grip = SET.msFrame, SET.msLabel, SET.msGrip
     if not f then return end
 
-    if th.square then
+    if th.square or th.aero then
         f.BackgroundColor3 = th.btn
         f.BackgroundTransparency = 0
         if lbl then
@@ -848,7 +959,7 @@ function SET.applyTheme()
 
     mainFrame.BackgroundColor3 = th.panel
 
-    -- Thanh tiêu đề: nền phẳng, hoặc gradient navy -> xanh nhạt kiểu Windows 98
+    -- Thanh tiêu đề: nền phẳng, hoặc gradient (Windows Standard: navy -> xanh nhạt; Aero: xanh trời -> xanh băng)
     if not SET.titleGrad then
         local g = Instance.new("UIGradient")
         g.Name = "IcoGradient"
@@ -859,11 +970,29 @@ function SET.applyTheme()
     end
     if th.gradient then
         titleBar.BackgroundColor3 = Color3.new(1, 1, 1)
+        SET.titleGrad.Color = ColorSequence.new(
+            th.gradA or Color3.fromRGB(0, 0, 128),
+            th.gradB or Color3.fromRGB(16, 132, 208))
         SET.titleGrad.Enabled = true
     else
         titleBar.BackgroundColor3 = th.title
         SET.titleGrad.Enabled = false
     end
+
+    -- Lớp bóng kính (nửa trên thanh tiêu đề sáng hơn) chỉ dành cho Aero
+    if not SET.titleGloss then
+        local gl = Instance.new("Frame")
+        gl.Name = "IcoGloss"
+        gl.BackgroundColor3 = Color3.new(1, 1, 1)
+        gl.BackgroundTransparency = 0.62
+        gl.BorderSizePixel = 0
+        gl.Position = UDim2.new(0, 0, 0, 0)
+        gl.Size = UDim2.new(1, 0, 0.5, 0)
+        gl.Visible = false
+        gl.Parent = titleBar
+        SET.titleGloss = gl
+    end
+    SET.titleGloss.Visible = th.aero == true
 
     flagWarningLabel.TextColor3 = th.warn
     antiLagNoteLabel.TextColor3 = th.note
@@ -872,6 +1001,7 @@ function SET.applyTheme()
     if SET.helpPage then SET.helpPage.ScrollBarImageColor3 = scrollColor end
 
     SET.setBevel(th.bevel == true)
+    SET.setAero(th)
 
     local iconColor = th.icon or Color3.fromRGB(255, 255, 255)
     local white = Color3.fromRGB(255, 255, 255)
@@ -888,7 +1018,7 @@ function SET.applyTheme()
             local isText = d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox")
             local isDrop = n:sub(1, 4) == "Drop"
 
-            -- Font (Windows Standard dùng Arial; theme khác trả về font gốc)
+            -- Font (Windows Standard dùng Arial, Aero dùng SourceSans; theme khác trả về font gốc)
             if isText and not isDrop then
                 local orig = SET.fontOrig[d]
                 if not orig then
@@ -931,7 +1061,17 @@ function SET.applyTheme()
         end
     end
 
+    -- Aero: nút X màu đỏ, chữ trắng (như nút đóng cửa sổ Vista / 7)
+    if th.aero then
+        closeBtn.BackgroundColor3 = Color3.fromRGB(214, 84, 70)
+        SET.adjusting = true
+        closeBtn.TextColor3 = white
+        SET.adjusting = false
+    end
+
     titleLabel.TextColor3 = th.titleText
+    titleLabel.TextStrokeColor3 = Color3.new(1, 1, 1)
+    titleLabel.TextStrokeTransparency = th.aero and 0.5 or 1 -- quầng sáng quanh chữ tiêu đề kiểu Aero
     if SET.refreshTitleIcons then SET.refreshTitleIcons() end
     SET.refreshIcon()
     SET.applyPerf(th)
@@ -1426,7 +1566,7 @@ do
         "<b>MAIN PAGE</b>",
         "- ESP: draws the solver results on the board. Red = sure mine, green = sure safe, yellow = best guess.",
         "- AUTO FLAG: places flags on sure mines and removes flags from sure safe tiles. Speed comes from Flag delay and Flag batch.",
-        "- ANTI-LAG: lighter mode with a smaller solving / ESP range (60 studs) and slower scanning. In Endless it selects the light profile.",
+        "- ANTI-LAG: lighter mode with a smaller solving / ESP range (60 studs) and slower scanning. In Endless it selects the light profile. In normal mode it also turns off the whole-board mine-count rules.",
         "- ENDLESS: for the endless board. Only the tiles around you are loaded and solved, and the global mine-count rules are off.",
         "- AUTO OPEN: touches sure safe tiles to open them. Speed comes from Open delay and Open batch.",
         "- Destroy UI: stops everything, restores every property the script changed and removes the menu.",
@@ -1439,11 +1579,11 @@ do
         "- Open delay / Open batch: the same for opening tiles.",
         "- The line under them shows the estimated flags per second and opens per second.",
         "- Action range: how far (studs) Auto Flag and Auto Open may act.",
-        "- Total mines: mines on the board. Used by the mine-count rules and the status line.",
+        "- Total mines: mines on the board. Used by the mine-count rules and the status line. Make sure it matches the real board.",
         "- Here at mines: the Here pillars appear only after this many mines are known.",
         "",
         "<b>INTERFACE</b>",
-        "- Theme: the black box with an arrow. Tap it to open a scrollable list of themes (Default, Windows Standard and more). Windows Standard imitates the classic Windows look: grey bevelled buttons, white sunken text boxes, a blue gradient title bar and Arial text. The small MS button turns into a square bevelled button as well (and looks pressed while the menu is open).",
+        "- Theme: the black box with an arrow. Tap it to open a scrollable list of themes (Default, Windows Standard, Windows Aero and more). Windows Standard imitates the classic Windows look: grey bevelled buttons, white sunken text boxes, a blue gradient title bar and Arial text. Windows Aero imitates Vista / 7: rounded glass-blue window, glossy buttons, thin steel-blue borders, a shiny gradient title bar with a red X button. For a glass look set Transparency to about 0.15 - 0.25. The small MS button follows the theme too.",
         "- UI scale: size of the menu. Transparency: how see-through it is.",
         "- Perf width / height: size of the ms box. You can also drag its + corner.",
         "",
@@ -1465,6 +1605,7 @@ do
         "<b>TIPS</b>",
         "- If tiles still explode, use the Safe preset and lower Action range.",
         "- Flags are never needed by the solver. It only reads the numbers.",
+        "- Tiles at the edge or corner of the board are only fully used in normal mode. Endless ignores number tiles that do not have all 8 neighbours loaded.",
     }, "\n")
 end
 
@@ -1635,7 +1776,12 @@ local ENDLESS_GUESS_OUTSIDE = false   -- false: Endless chỉ đoán trên ô bi
 local CONFIRM_DELAY = 0.2             -- (Endless) ô mìn/an toàn phải tồn tại >= 0.2s mới được auto touch
 local ENDLESS_DEFAULT_DENSITY = 0.2   -- xác suất mìn ước lượng cho ô chưa có thông tin
 
+-- FIX: mặc định TẮT Endless cho khớp với chữ "ENDLESS: OFF" trên nút (trước đây = true nên script chạy Endless mà nút báo OFF,
+-- khiến ô số ở góc / mép bị bỏ qua vì không đủ 8 ô xung quanh).
 local isEndlessOn = false
+-- FIX: khai báo isAntiLagOn TRƯỚC bảng EL. Trước đây nó được khai báo sau EL nên EL.prof() đọc biến toàn cục (luôn nil)
+-- => Anti-Lag không bao giờ chọn được profile "light" của Endless.
+local isAntiLagOn = false
 local endlessLastCenter = nil
 local endlessTileDim = 8
 local customUnrevealed = nil           -- màu ô chưa mở đã học thêm (Endless), dùng song song với màu mặc định
@@ -1685,7 +1831,6 @@ local isScanning = false -- shared analysis engine, not the ESP switch
 local isEspOn = false
 local isAutoFlagging = false
 local isAutoOpening = false
-local isAntiLagOn = false
 
 local solverGeneration = 0
 local autoFlagGeneration = 0
@@ -1820,9 +1965,12 @@ local function isWithinDistance(part, charPos, maxDist)
     return (part.Position - charPos).Magnitude <= maxDist
 end
 
--- Solver luôn có giới hạn phạm vi:
--- Cả chế độ thường và Endless: Anti-Lag OFF = 100 studs, ON = 60 studs.
--- Không dùng suy luận tổng mìn toàn bàn khi chỉ quét một vùng giới hạn.
+-- Phạm vi giải:
+--  * Endless: luôn giới hạn theo cửa sổ quanh người chơi.
+--  * Chế độ thường + Anti-Lag ON: giới hạn 60 studs (không dùng suy luận tổng mìn toàn bàn).
+--  * Chế độ thường + Anti-Lag OFF: giải CẢ BÀN và dùng ràng buộc tổng số mìn + suy luận ô cuối.
+-- FIX: trước đây hàm này luôn trả về true nên suy luận tổng số mìn / ô cuối không bao giờ chạy
+-- và ô ở xa người chơi (mép, góc) không được giải.
 local function isRangeLimited()
     return isEndlessOn or isAntiLagOn
 end
@@ -3343,7 +3491,7 @@ end
 -- các ô chưa rõ còn sót lại được quyết định hoàn toàn bởi tổng số mìn.
 --   R = TOTAL - số mìn đã biết,  U = số ô chưa mở và chưa xác định
 --   R == 0 -> toàn bộ U an toàn;  R == U -> toàn bộ U là mìn
--- Chỉ chạy khi Anti-Lag OFF (cần nhìn thấy cả bàn).
+-- Chỉ chạy khi giải cả bàn (Endless OFF và Anti-Lag OFF).
 local function deduceLastTiles(charPos)
     if not LAST_TILE_DEDUCTION or not GLOBAL_MINES_ENABLED or isRangeLimited() then return false end
 
@@ -3617,8 +3765,8 @@ function SET.setAntiStatic(on)
 end
 
 -- Bấm lại một ô khi lần bấm trước KHÔNG có tác dụng (server bỏ qua / bấm trượt): chờ 0.7s, rồi 1.2s, rồi 2s.
--- Sau 4 lần mà vẫn chưa đổi được thì nghỉ 8s (tránh bật / tắt cờ liên tục khi không nhận ra cờ).
--- (Trước đây mọi ô bị chặn cứng 2s sau mỗi lần bấm nên ô bị bỏ lỡ phải chờ rất lâu mới được đặt lại.)
+-- Sau 4 lần mà vẫn chưa đổi được thì nghỉ 2.5s (tránh bật / tắt cờ liên tục khi không nhận ra cờ).
+-- FIX: trước đây nghỉ 8s nên trông như script bỏ sót ô dù đã rảnh.
 SET.flagTries = setmetatable({}, { __mode = "k" })
 SET.retryGaps = { 0.7, 1.2, 2.0 }
 
