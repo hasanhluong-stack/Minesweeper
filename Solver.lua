@@ -1,4 +1,4 @@
--- V9.15
+-- V10.5
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -200,7 +200,7 @@ do
     title.BackgroundTransparency = 1
     title.Position = UDim2.new(0, 8, 0, 170)
     title.Size = UDim2.new(0, 184, 0, 14)
-    title.Text = "Comment"
+    title.Text = "Link"
     title.TextColor3 = Color3.fromRGB(255, 220, 100)
     title.Font = Enum.Font.GothamBold
     title.TextSize = 12
@@ -311,6 +311,7 @@ local SET = {
     resizing = false,
     ready = false,        -- đã khởi tạo xong (từ đó thay đổi mới được tự lưu)
     markLeftover = true,  -- Đánh dấu ô còn sót: bật thanh Here (độc lập với ESP) - mặc định BẬT
+    antiSpike = false,  -- Anti-Spike: gỡ các part / model tên Spike nằm trực tiếp trong Workspace
     antiStatic = false, -- Anti-Static: vô hiệu hóa mọi thứ trong PlayerGui.Gui
     noStep = false,    -- Không giẫm mìn: tắt CanTouch của các ô script biết là mìn
     open = false,      -- đang ở trang Settings?
@@ -335,7 +336,7 @@ SET.limits = {
     msH = { 24, 200, true },
     theme = { 1, 8, true },
 }
-SET.boolKeys = { "noStep", "antiStatic", "markLeftover", "collapsed", "showMs" }
+SET.boolKeys = { "noStep", "antiStatic", "antiSpike", "markLeftover", "collapsed", "showMs" }
 SET.extraKeys = { "menuFx", "menuFy", "msFx", "msFy" } -- vị trí menu / khung ms (tỉ lệ 0..1 trong vùng trống của màn hình) -- các công tắc được lưu (không lưu ESP / Auto Flag / Auto Open)
 
 -- Bảng màu ESP (đổi bằng nút trong Settings)
@@ -520,7 +521,11 @@ end
 
 local function setPanelVisible(v)
     mainFrame.Visible = v
-    iconBtn.TextColor3 = v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 255, 255)
+    if SET.refreshIcon then
+        SET.refreshIcon()
+    else
+        iconBtn.TextColor3 = v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 255, 255)
+    end
 end
 
 -- Khi thu gọn, thanh tiêu đề hiện luôn trạng thái
@@ -654,7 +659,7 @@ SET.themes = {
       info = Color3.fromRGB(170, 220, 255), warn = Color3.fromRGB(255, 220, 100), note = Color3.fromRGB(255, 170, 100) },
     -- Windows Standard (kiểu Windows 95/98): nền xám ButtonFace, viền nổi / chìm 2 lớp, thanh tiêu đề gradient navy -> xanh nhạt,
     -- chữ đen font Arial, ô nhập nền trắng chìm.
-    { name = "Windows Standard", light = true, bevel = true, gradient = true,
+    { name = "Windows Standard", light = true, bevel = true, gradient = true, square = true,
       font = Enum.Font.Arial, fontBold = Enum.Font.ArialBold,
       panel = Color3.fromRGB(192, 192, 192), title = Color3.fromRGB(0, 0, 128), titleText = Color3.fromRGB(255, 255, 255),
       btn = Color3.fromRGB(192, 192, 192), boxBg = Color3.fromRGB(255, 255, 255), boxText = Color3.fromRGB(0, 0, 0),
@@ -710,62 +715,128 @@ end
 
 -- Viền 3D kiểu Windows cổ điển (2 lớp): nổi cho nút / cửa sổ, chìm cho ô nhập / thanh trạng thái.
 -- Chỉ được tạo lần đầu khi chọn theme Windows Standard; theme khác thì ẩn đi.
+SET.bevels = {}
+SET.bevelsBuilt = false
+
+function SET.addBevel(obj, sunken, store)
+    local list = {}
+    local white, light, grey, black = Color3.fromRGB(255, 255, 255), Color3.fromRGB(223, 223, 223),
+        Color3.fromRGB(128, 128, 128), Color3.fromRGB(0, 0, 0)
+    local outerTL, innerTL, outerBR, innerBR = white, light, black, grey
+    if sunken then outerTL, innerTL, outerBR, innerBR = grey, black, white, light end
+
+    local function edge(pos, size, color)
+        local f = Instance.new("Frame")
+        f.Name = "IcoBevel"
+        f.BorderSizePixel = 0
+        f.BackgroundColor3 = color
+        f.Position = pos
+        f.Size = size
+        f.ZIndex = obj.ZIndex + 1
+        f.Parent = obj
+        list[#list + 1] = f
+    end
+
+    edge(UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 0, 1), outerTL)   -- trên (ngoài)
+    edge(UDim2.new(0, 0, 0, 0), UDim2.new(0, 1, 1, 0), outerTL)   -- trái (ngoài)
+    edge(UDim2.new(0, 1, 0, 1), UDim2.new(1, -2, 0, 1), innerTL)  -- trên (trong)
+    edge(UDim2.new(0, 1, 0, 1), UDim2.new(0, 1, 1, -2), innerTL)  -- trái (trong)
+    edge(UDim2.new(0, 1, 1, -2), UDim2.new(1, -2, 0, 1), innerBR) -- dưới (trong)
+    edge(UDim2.new(1, -2, 0, 1), UDim2.new(0, 1, 1, -2), innerBR) -- phải (trong)
+    edge(UDim2.new(0, 0, 1, -1), UDim2.new(1, 0, 0, 1), outerBR)  -- dưới (ngoài)
+    edge(UDim2.new(1, -1, 0, 0), UDim2.new(0, 1, 1, 0), outerBR)  -- phải (ngoài)
+    SET.bevels[store or obj] = list
+end
+
 function SET.setBevel(on)
-    if on and not SET.bevels then
-        SET.bevels = {}
+    if on and not SET.bevelsBuilt then
+        SET.bevelsBuilt = true
 
-        local function edge(list, obj, pos, size, color)
-            local f = Instance.new("Frame")
-            f.Name = "IcoBevel"
-            f.BorderSizePixel = 0
-            f.BackgroundColor3 = color
-            f.Position = pos
-            f.Size = size
-            f.ZIndex = obj.ZIndex + 1
-            f.Parent = obj
-            list[#list + 1] = f
-        end
-
-        local function addBevel(obj, sunken)
-            local list = {}
-            local white, light, grey, black = Color3.fromRGB(255, 255, 255), Color3.fromRGB(223, 223, 223),
-                Color3.fromRGB(128, 128, 128), Color3.fromRGB(0, 0, 0)
-            local outerTL, innerTL, outerBR, innerBR = white, light, black, grey
-            if sunken then outerTL, innerTL, outerBR, innerBR = grey, black, white, light end
-
-            edge(list, obj, UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 0, 1), outerTL)   -- trên (ngoài)
-            edge(list, obj, UDim2.new(0, 0, 0, 0), UDim2.new(0, 1, 1, 0), outerTL)   -- trái (ngoài)
-            edge(list, obj, UDim2.new(0, 1, 0, 1), UDim2.new(1, -2, 0, 1), innerTL)  -- trên (trong)
-            edge(list, obj, UDim2.new(0, 1, 0, 1), UDim2.new(0, 1, 1, -2), innerTL)  -- trái (trong)
-            edge(list, obj, UDim2.new(0, 1, 1, -2), UDim2.new(1, -2, 0, 1), innerBR) -- dưới (trong)
-            edge(list, obj, UDim2.new(1, -2, 0, 1), UDim2.new(0, 1, 1, -2), innerBR) -- phải (trong)
-            edge(list, obj, UDim2.new(0, 0, 1, -1), UDim2.new(1, 0, 0, 1), outerBR)  -- dưới (ngoài)
-            edge(list, obj, UDim2.new(1, -1, 0, 0), UDim2.new(0, 1, 1, 0), outerBR)  -- phải (ngoài)
-            SET.bevels[obj] = list
-        end
-
-        addBevel(mainFrame, false)
+        SET.addBevel(mainFrame, false)
         for _, d in ipairs(mainFrame:GetDescendants()) do
             local n = d.Name
             if n:sub(1, 3) ~= "Ico" then
                 if n == "DropBox" then
-                    addBevel(d, true)
+                    SET.addBevel(d, true)
                 elseif n:sub(1, 4) ~= "Drop" then
                     if d:IsA("TextButton") then
-                        addBevel(d, false)
+                        SET.addBevel(d, false)
                     elseif d:IsA("TextBox") then
-                        addBevel(d, true)
+                        SET.addBevel(d, true)
                     elseif d:IsA("TextLabel") and d.BackgroundTransparency < 1 then
-                        addBevel(d, true)
+                        SET.addBevel(d, true)
                     end
                 end
             end
         end
+
+        -- các GUI nhỏ nằm ngoài menu: nút MS (nổi khi menu ẩn, chìm khi menu đang mở), khung ms và tay nắm của nó
+        SET.addBevel(iconBtn, false)
+        SET.addBevel(iconBtn, true, "iconSunken")
+        if SET.msFrame then SET.addBevel(SET.msFrame, false) end
+        if SET.msGrip then SET.addBevel(SET.msGrip, false) end
     end
 
-    if SET.bevels then
-        for _, list in pairs(SET.bevels) do
-            for _, f in ipairs(list) do f.Visible = on end
+    for _, list in pairs(SET.bevels) do
+        for _, f in ipairs(list) do f.Visible = on end
+    end
+end
+
+-- Nút MS bật / tắt menu: tròn ở các theme thường; Windows Standard = hình vuông xám, viền 3D nổi,
+-- chữ đen Arial đậm, và viền CHÌM khi menu đang mở (giống nút "đang nhấn" trên thanh taskbar).
+function SET.refreshIcon()
+    local th = SET.themes[SET.theme] or SET.themes[1]
+    local visible = mainFrame.Visible
+
+    if th.square then
+        iconCorner.CornerRadius = UDim.new(0, 0)
+        iconBtn.BackgroundColor3 = th.btn
+        iconBtn.BackgroundTransparency = 0
+        iconBtn.Font = th.fontBold or Enum.Font.GothamBold
+        iconBtn.TextColor3 = th.icon or Color3.fromRGB(0, 0, 0)
+    else
+        iconCorner.CornerRadius = UDim.new(0, 19)
+        iconBtn.BackgroundColor3 = th.panel
+        iconBtn.BackgroundTransparency = 0.15
+        iconBtn.Font = Enum.Font.GothamBold
+        iconBtn.TextColor3 = visible and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 255, 255)
+    end
+    iconBtn.AutoButtonColor = false
+
+    local on = th.bevel == true
+    local raised, sunk = SET.bevels[iconBtn], SET.bevels.iconSunken
+    if raised then for _, f in ipairs(raised) do f.Visible = on and not visible end end
+    if sunk then for _, f in ipairs(sunk) do f.Visible = on and visible end end
+end
+
+-- Khung thời gian (ms): Windows Standard = hộp xám có viền 3D, chữ đen; theme khác = hộp tối chữ xanh như cũ
+function SET.applyPerf(th)
+    local f, lbl, grip = SET.msFrame, SET.msLabel, SET.msGrip
+    if not f then return end
+
+    if th.square then
+        f.BackgroundColor3 = th.btn
+        f.BackgroundTransparency = 0
+        if lbl then
+            lbl.TextColor3 = th.icon or Color3.fromRGB(0, 0, 0)
+            lbl.Font = th.font or Enum.Font.Code
+        end
+        if grip then
+            grip.BackgroundColor3 = th.btn
+            grip.TextColor3 = th.icon or Color3.fromRGB(0, 0, 0)
+            grip.Font = th.fontBold or Enum.Font.GothamBold
+        end
+    else
+        f.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        f.BackgroundTransparency = 0.25
+        if lbl then
+            lbl.TextColor3 = Color3.fromRGB(170, 255, 170)
+            lbl.Font = Enum.Font.Code
+        end
+        if grip then
+            grip.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+            grip.TextColor3 = Color3.fromRGB(255, 255, 255)
+            grip.Font = Enum.Font.GothamBold
         end
     end
 end
@@ -862,6 +933,8 @@ function SET.applyTheme()
 
     titleLabel.TextColor3 = th.titleText
     if SET.refreshTitleIcons then SET.refreshTitleIcons() end
+    SET.refreshIcon()
+    SET.applyPerf(th)
 end
 
 function SET.applyAll()
@@ -886,7 +959,7 @@ do
     page.Visible = false
     page.ScrollingDirection = Enum.ScrollingDirection.Y
     page.ScrollBarThickness = 4
-    page.CanvasSize = UDim2.new(0, 0, 0, 748)
+    page.CanvasSize = UDim2.new(0, 0, 0, 774)
     SET.page = page
 
     local function makeLabel(text, x, y, w, h, color, size, role)
@@ -1249,15 +1322,23 @@ do
         SET.queueSave()
     end)
 
+    -- Anti-Spike: gỡ part / model tên Spike trực tiếp trong Workspace; tắt = đặt lại
+    local spikeBtn, refreshSpike = makeToggle(660, "ANTI-SPIKE", function() return SET.antiSpike end)
+    spikeBtn.MouseButton1Click:Connect(function()
+        if SET.setAntiSpike then SET.setAntiSpike(not SET.antiSpike) end
+        refreshSpike()
+        SET.queueSave()
+    end)
+
     -- Lưu / đặt lại
-    local saveBtn = makeButton(8, 666, 90, "Save now", Color3.fromRGB(0, 255, 0))
+    local saveBtn = makeButton(8, 692, 90, "Save now", Color3.fromRGB(0, 255, 0))
     saveBtn.MouseButton1Click:Connect(function() SET.save() end)
 
     local function refreshCycles()
         refreshStyle(); refreshMine(); refreshSafe(); refreshGuess()
     end
 
-    local reset = makeButton(102, 666, 90, "Reset defaults", Color3.fromRGB(255, 170, 0))
+    local reset = makeButton(102, 692, 90, "Reset defaults", Color3.fromRGB(255, 170, 0))
     reset.MouseButton1Click:Connect(function()
         for key, v in pairs(DEFAULTS) do SET[key] = v end
         refreshBoxes()
@@ -1269,7 +1350,7 @@ do
     end)
 
     -- Đưa menu / khung ms về vị trí mặc định (phòng khi bị lọt khỏi tầm thao tác)
-    local resetPos = makeButton(8, 692, 184, "Reset GUI position", Color3.fromRGB(255, 170, 0))
+    local resetPos = makeButton(8, 718, 184, "Reset GUI position", Color3.fromRGB(255, 170, 0))
     resetPos.MouseButton1Click:Connect(function()
         mainFrame.Position = SET.defaultMenuPos
         if SET.msFrame then SET.msFrame.Position = SET.defaultMsPos end
@@ -1281,7 +1362,7 @@ do
         SET.queueSave()
     end)
 
-    SET.msgLabel = makeLabel(SET.saveMsg, 8, 720, 184, 16, Color3.fromRGB(170, 220, 255), 11, "info")
+    SET.msgLabel = makeLabel(SET.saveMsg, 8, 746, 184, 16, Color3.fromRGB(170, 220, 255), 11, "info")
 
     SET.refreshUI = function()
         refreshBoxes()
@@ -1291,6 +1372,7 @@ do
         refreshAnti()
         refreshMark()
         refreshMs()
+        refreshSpike()
     end
 
     refreshBoxes()
@@ -1361,7 +1443,7 @@ do
         "- Here at mines: the Here pillars appear only after this many mines are known.",
         "",
         "<b>INTERFACE</b>",
-        "- Theme: the black box with an arrow. Tap it to open a scrollable list of themes (Default, Windows Standard and more). Windows Standard imitates the classic Windows look: grey bevelled buttons, white sunken text boxes, a blue gradient title bar and Arial text.",
+        "- Theme: the black box with an arrow. Tap it to open a scrollable list of themes (Default, Windows Standard and more). Windows Standard imitates the classic Windows look: grey bevelled buttons, white sunken text boxes, a blue gradient title bar and Arial text. The small MS button turns into a square bevelled button as well (and looks pressed while the menu is open).",
         "- UI scale: size of the menu. Transparency: how see-through it is.",
         "- Perf width / height: size of the ms box. You can also drag its + corner.",
         "",
@@ -1372,6 +1454,7 @@ do
         "<b>TOGGLES</b>",
         "- NO-STEP MINES: turns CanTouch off on known mines. It may do nothing if the server checks the touches.",
         "- ANTI-STATIC: disables everything inside PlayerGui.Gui. Turn it off to restore it.",
+        "- ANTI-SPIKE: removes every part or model whose name contains the word spike (for example Spike) when it sits directly inside Workspace. Only direct children are checked, not what is nested deeper. Turn it off to put them back.",
         "- MARK LEFTOVER: shows the Here pillars (white = nearest unopened, green = safe, yellow = guess). Works without ESP.",
         "- SHOW PERF (ms): shows a draggable, resizable box with tick, solve and scan time.",
         "",
@@ -1413,6 +1496,7 @@ do
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.TextYAlignment = Enum.TextYAlignment.Top
     lbl.BorderSizePixel = 0
+    SET.msLabel = lbl
 
     makeDraggable(f, f, nil, function() SET.queueSave() end)
 
@@ -1428,6 +1512,7 @@ do
     grip.Text = "+"
     grip.AutoButtonColor = true
     grip.BorderSizePixel = 0
+    SET.msGrip = grip
 
     local resizing, startW, startH, startPt = false, 0, 0, nil
 
@@ -1550,7 +1635,7 @@ local ENDLESS_GUESS_OUTSIDE = false   -- false: Endless chỉ đoán trên ô bi
 local CONFIRM_DELAY = 0.2             -- (Endless) ô mìn/an toàn phải tồn tại >= 0.2s mới được auto touch
 local ENDLESS_DEFAULT_DENSITY = 0.2   -- xác suất mìn ước lượng cho ô chưa có thông tin
 
-local isEndlessOn = false
+local isEndlessOn = true
 local endlessLastCenter = nil
 local endlessTileDim = 8
 local customUnrevealed = nil           -- màu ô chưa mở đã học thêm (Endless), dùng song song với màu mặc định
@@ -3582,6 +3667,78 @@ function SET.perfText()
         isEndlessOn and (isAntiLagOn and "Endless-AL" or "Endless") or "Normal")
 end
 
+-- ANTI-SPIKE: gỡ khỏi Workspace các part / model có tên "Spike" hoặc tên giống (chứa chữ "spike", không phân biệt hoa thường).
+-- CHỈ xét con TRỰC TIẾP của Workspace (không đi sâu vào bên trong các model / folder).
+-- Vật bị gỡ được cất lại (Parent = nil) nên tắt Anti-Spike là đặt lại đúng chỗ cũ.
+SET.spike = { removed = {}, conn = nil, gen = 0 }
+
+function SET.spikeMatch(inst)
+    if not (inst:IsA("BasePart") or inst:IsA("Model")) then return false end
+    -- không bao giờ đụng vào nhân vật của người chơi (tên người chơi có thể chứa chữ "spike")
+    if inst:IsA("Model") and Players:GetPlayerFromCharacter(inst) then return false end
+    return string.find(string.lower(inst.Name), "spike", 1, true) ~= nil
+end
+
+function SET.spikeRemove(inst)
+    if inst.Parent ~= Workspace then return end
+    local sp = SET.spike
+    if #sp.removed >= 300 then
+        -- danh sách quá dài (game liên tục sinh spike): xoá hẳn cái cũ nhất để không phình bộ nhớ
+        local oldest = table.remove(sp.removed, 1)
+        pcall(function() oldest:Destroy() end)
+    end
+    sp.removed[#sp.removed + 1] = inst
+    pcall(function() inst.Parent = nil end)
+end
+
+function SET.spikeSweep()
+    for _, ch in ipairs(Workspace:GetChildren()) do
+        if SET.spikeMatch(ch) then SET.spikeRemove(ch) end
+    end
+end
+
+function SET.spikeRestore()
+    local sp = SET.spike
+    for _, inst in ipairs(sp.removed) do
+        pcall(function() inst.Parent = Workspace end)
+    end
+    sp.removed = {}
+end
+
+function SET.setAntiSpike(on)
+    local sp = SET.spike
+    SET.antiSpike = on
+    sp.gen = sp.gen + 1
+    local myGen = sp.gen
+
+    if sp.conn then
+        sp.conn:Disconnect()
+        sp.conn = nil
+    end
+
+    if not on then
+        SET.spikeRestore()
+        return
+    end
+
+    SET.spikeSweep()
+
+    -- vật mới sinh ra trong Workspace: gỡ ngay
+    sp.conn = Workspace.ChildAdded:Connect(function(ch)
+        if SET.antiSpike and sp.gen == myGen and SET.spikeMatch(ch) then
+            task.defer(function() SET.spikeRemove(ch) end)
+        end
+    end)
+
+    -- quét lại mỗi giây phòng khi game đổi tên / đặt lại vật
+    task.spawn(function()
+        while SET.antiSpike and sp.gen == myGen do
+            task.wait(1)
+            SET.spikeSweep()
+        end
+    end)
+end
+
 local lastFlagRefresh = 0
 local lastStatusText = ""
 
@@ -4254,6 +4411,7 @@ end)
 local function destroyAll()
     pcall(SET.restore)
     pcall(SET.setAntiStatic, false)
+    pcall(SET.setAntiSpike, false)
     isEspOn = false
     isScanning = false
     isAutoFlagging = false
@@ -4293,6 +4451,7 @@ task.defer(function()
     SET.ready = true
 end)
 if SET.antiStatic then SET.setAntiStatic(true) end
+if SET.antiSpike then SET.setAntiSpike(true) end
 if SET.markLeftover or SET.noStep then
     task.defer(function()
         if requestEngine then requestEngine() end
