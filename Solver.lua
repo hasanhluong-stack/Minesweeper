@@ -1,4 +1,4 @@
--- V11
+-- V12
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -195,7 +195,7 @@ local destroyBtn = createButton("DestroyBtn", "Destroy UI", 8, 146, 184, 20, Col
 -- Link: tiêu đề "Link" ở giữa, bên dưới là URL (hiện rút gọn bằng "..." khi không đủ chỗ) và nút copy.
 -- URL đầy đủ nằm sẵn trong script; nút copy đặt ĐỦ URL vào clipboard.
 do
-    local LINK = "https://github.com/hasanhluong-stack/Minesweeper/blob/main/Solver.lua"
+    local LINK = "https://scriptblox.com/script/bLockermans-Minesweeper-Auto-open-solution-Remake-Update-237597"
 
     local title = Instance.new("TextLabel")
     title.Name = "LinkTitle"
@@ -1602,6 +1602,12 @@ do
         "- Settings are saved automatically to MinesweeperS/Save in the Delta workspace. Save now writes immediately.",
         "- Reset defaults restores the numbers, colors and theme. Reset GUI position puts the menu back on screen.",
         "",
+        "<b>HOW TILES ARE READ</b>",
+        "- No NumberGui inside the part: unopened tile.",
+        "- NumberGui whose TextLabel shows a digit 1-8: number tile.",
+        "- NumberGui whose TextLabel is empty: empty (junk) tile, treated as already opened.",
+        "- Colors are no longer used to tell tiles apart.",
+        "",
         "<b>TIPS</b>",
         "- If tiles still explode, use the Safe preset and lower Action range.",
         "- Flags are never needed by the solver. It only reads the numbers.",
@@ -2017,75 +2023,52 @@ local function isColorMatch(c1, r, g, b)
     return math.abs(c1.R - r) < 0.05 and math.abs(c1.G - g) < 0.05 and math.abs(c1.B - b) < 0.05
 end
 
--- Ô rác: RGB(255,255,125)
+-- ===================== PHÂN BIỆT Ô THEO CẤU TRÚC (không còn dùng màu) =====================
+--   Không có NumberGui                                 -> ô CHƯA MỞ
+--   Có NumberGui, TextLabel bên trong có số 1..8       -> ô SỐ
+--   Có NumberGui, TextLabel bên trong không có gì      -> ô RÁC (đã mở, không có số)
+SET.junk = setmetatable({}, { __mode = "k" }) -- ô rác đã xác nhận (đọc nhiều lần vẫn trống): bỏ qua hẳn khi quét
+SET.tileRoot = nil                            -- workspace.Flag.Parts (gán khi quét bàn / dựng cửa sổ Endless)
+
+-- Trả về: "u" (chưa mở) | "n", số (ô số) | "j" (ô rác); nil nếu không phải BasePart / đã bị huỷ
+local function classify(part)
+    if not part or not part.Parent or not part:IsA("BasePart") then return nil end
+    local ng = part:FindFirstChild("NumberGui")
+    if not ng then return "u" end
+
+    local label = ng:FindFirstChild("TextLabel") or ng:FindFirstChildWhichIsA("TextLabel", true)
+    if label then
+        local num = tonumber(string.match(label.Text, "%d+"))
+        if num and num >= 1 and num <= 8 then return "n", num end
+    end
+    return "j"
+end
+
+-- Ô rác (đã mở, NumberGui trống)
 local function isExcluded(part)
-    if not part:IsA("BasePart") then return true end
-    return isColorMatch(part.Color, 1.000, 1.000, 0.490)
-end
-
--- Ô số: RGB(230,230,113)
-local function isNumberColor(part)
-    if not part or not part:IsA("BasePart") then return false end
-    return isColorMatch(part.Color, 0.902, 0.902, 0.443)
-end
-
--- Ô chưa mở: chỉ dựa trên màu (không phụ thuộc cache số) để phát hiện ván reset
--- Bốn màu ô chưa mở mặc định, hỗ trợ cả hai kiểu bàn:
--- Cũ: RGB(205,142,100) & RGB(180,125,88)
--- Mới: RGB(117,205,100) & RGB(103,180,88)
-local function isDefaultUnrevealedColor(c)
-    return isColorMatch(c, 0.804, 0.557, 0.392)
-        or isColorMatch(c, 0.706, 0.490, 0.345)
-        or isColorMatch(c, 0.459, 0.804, 0.392)
-        or isColorMatch(c, 0.404, 0.706, 0.345)
+    return classify(part) == "j"
 end
 
 local function isUnrevealed(part)
-    if not part or not part.Parent or not part:IsA("BasePart") then return false end
-    local c = part.Color
-    if isColorMatch(c, 1.000, 1.000, 0.490) then return false end
-    if isDefaultUnrevealedColor(c) then return true end
-    if customUnrevealed then
-        for _, u in ipairs(customUnrevealed) do
-            if isColorMatch(c, u.R, u.G, u.B) then return true end
-        end
-    end
-    return false
+    if SET.junk[part] then return false end
+    return classify(part) == "u"
 end
 
--- FIX: bản gốc có thể lặp vô hạn ở đây (FindFirstChildWhichIsA không nhận tham số thứ 3)
 local function getNumber(part)
-    if not part or not part:IsA("BasePart") or isExcluded(part) then return nil end
-
-    -- Cấu trúc ô số: part.NumberGui.TextLabel (đọc thuộc tính Text)
-    local ng = part:FindFirstChild("NumberGui")
-    local direct = ng and ng:FindFirstChild("TextLabel")
-    if direct and direct:IsA("TextLabel") then
-        local num = tonumber(string.match(direct.Text, "%d+"))
-        if num and num >= 1 and num <= 8 then return num end
-        return nil
-    end
-
-    for _, d in ipairs(part:GetDescendants()) do
-        if d:IsA("TextLabel") and d.Visible then
-            local num = tonumber(string.match(d.Text, "%d+"))
-            if num and num >= 1 and num <= 8 then return num end
-        end
-    end
+    local kind, num = classify(part)
+    if kind == "n" then return num end
     return nil
 end
 
+-- Part nào là "ô" của bàn: có NumberGui (ô số / ô rác), hoặc là con trực tiếp của Flag.Parts (ô chưa mở),
+-- hoặc (dự phòng) tên "Part" nằm trong thư mục có chữ "part".
 local function isTileCandidate(part)
     if not part or not part:IsA("BasePart") then return false end
-    if isExcluded(part) then return false end
-    if isNumberColor(part) or isUnrevealed(part) then return true end
-    if part.Name == "Part" and part.Parent and string.find(string.lower(part.Parent.Name), "part") then
-        return true
-    end
-    if part:FindFirstChildWhichIsA("TextLabel", true) then
-        return getNumber(part) ~= nil
-    end
-    return false
+    if part:FindFirstChild("NumberGui") then return true end
+    local root = SET.tileRoot
+    if root and part.Parent == root then return true end
+    return part.Name == "Part" and part.Parent ~= nil
+        and string.find(string.lower(part.Parent.Name), "part", 1, true) ~= nil
 end
 
 local function countUnrevealedNeighbors(part)
@@ -2143,7 +2126,7 @@ local function refreshFlagCache()
             for _, desc in ipairs(Workspace:GetPartBoundsInRadius(charPos, radius, params)) do
                 -- Loại trừ các ô (tile). Ở Endless, cachedSet chứa MỌI part trong cửa sổ (kể cả part cờ)
                 -- nên phải dùng EL.cand (chỉ các ô) - nếu không cờ bị bỏ sót và Auto Flag bấm lặp lại mãi.
-                if not EL.cand[desc] and not isExcluded(desc) then addFlagPos(desc.Position) end
+                if not EL.cand[desc] then addFlagPos(desc.Position) end
             end
 
             -- Dự phòng: part cờ có CanQuery = false thì truy vấn không gian bỏ sót -> quét các nhánh khác của thư mục Flag
@@ -2524,7 +2507,7 @@ local function syncVisualsRange(charPos)
     -- gỡ ESP không còn hợp lệ
     for part, entry in pairs(trackedVisuals) do
         local drop = false
-        if not part.Parent or isExcluded(part) or numberTiles[part] or not isUnrevealed(part) then
+        if not part.Parent or numberTiles[part] or not isUnrevealed(part) then
             drop = true
         elseif not withinVisualRange(part, charPos) then
             drop = true
@@ -2647,6 +2630,7 @@ local function rescanBoard()
     neighborMap = {}
     local tileRoot = getTileRoot()
     if not tileRoot then return end
+    SET.tileRoot = tileRoot
 
     local candidates = {}
     for _, obj in ipairs(tileRoot:GetDescendants()) do
@@ -2660,49 +2644,7 @@ local function rescanBoard()
 end
 
 -- ENDLESS: lấy các part trong ENDLESS_RANGE (+đệm) quanh người chơi làm "cửa sổ" giải
--- Học màu "ô chưa mở" cho Endless:
---  * Ô số RGB(230,230,113) / ô rác RGB(255,255,125) / ô đọc được NumberGui số: loại khỏi thống kê
---  * Các màu ô chưa mở mặc định (205,142,100), (180,125,88), (117,205,100), (103,180,88) -> không cần học
---  * KHÔNG thấy ô mặc định nào mà có các màu khác -> lấy tối đa 2 màu xuất hiện nhiều nhất làm ô chưa mở
---  * Màu đã học được GIỮ và dùng song song với màu mặc định (không bật/tắt theo từng vùng)
-local function calibrateUnrevealedColors(found)
-    local defaultCount = 0
-    local groups = {}
-
-    for _, p in ipairs(found) do
-        if p:IsA("BasePart") and not isExcluded(p) and not isNumberColor(p) and not getNumber(p) then
-            local c = p.Color
-            if isDefaultUnrevealedColor(c) then
-                defaultCount = defaultCount + 1
-            else
-                local key = string.format("%d,%d,%d",
-                    math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
-                local g = groups[key]
-                if not g then g = { color = c, n = 0 }; groups[key] = g end
-                g.n = g.n + 1
-            end
-        end
-    end
-
-    if defaultCount > 0 then return end
-
-    if customUnrevealed then
-        for _, p in ipairs(found) do
-            if p:IsA("BasePart") and isUnrevealed(p) then return end -- bảng màu đã học vẫn còn khớp
-        end
-    end
-
-    local list = {}
-    for _, g in pairs(groups) do list[#list + 1] = g end
-    table.sort(list, function(a, b) return a.n > b.n end)
-    if #list == 0 or list[1].n < 4 then return end -- quá ít dữ liệu để kết luận
-
-    customUnrevealed = { list[1].color }
-    if list[2] and list[2].n >= 4 then customUnrevealed[2] = list[2].color end
-    EL.done = setmetatable({}, { __mode = "k" })
-    clearAllVisuals()
-    lastSig = nil
-end
+-- (Không còn học màu ô chưa mở: ô được phân biệt theo cấu trúc NumberGui - xem classify.)
 
 -- Reset toàn bộ cửa sổ Endless (dựng lại từ đầu ở vòng solver kế tiếp)
 function EL.reset(clearBoard)
@@ -2757,6 +2699,7 @@ end
 function EL.refresh(charPos)
     local tileRoot = getTileRoot()
     if not tileRoot or not charPos then return end
+    SET.tileRoot = tileRoot
 
     local myEpoch = EL.epoch
     local prof = EL.prof()
@@ -2777,10 +2720,6 @@ function EL.refresh(charPos)
     end
 
     local now = os.clock()
-    if not EL.built or now - EL.lastCalib > 8 then
-        EL.lastCalib = now
-        calibrateUnrevealedColors(found)
-    end
 
     local grid, cand, ring, pkey, cell = EL.grid, EL.cand, EL.ring, EL.pkey, EL.cell
     local nmap = neighborMap
@@ -2874,7 +2813,7 @@ function EL.refresh(charPos)
     -- 4) danh sách quét: chỉ các ô nằm trong bán kính tin cậy
     local newList = {}
     for q in pairs(nowSet) do
-        if cand[q] and (q.Position - charPos).Magnitude <= trust then
+        if cand[q] and not SET.junk[q] and (q.Position - charPos).Magnitude <= trust then
             newList[#newList + 1] = q
         end
     end
@@ -2920,6 +2859,7 @@ local function hardResetKnowledge()
     lastUnknown = {}
     endlessLastCenter = nil
     EL.done = setmetatable({}, { __mode = "k" })
+    SET.junk = setmetatable({}, { __mode = "k" })
     if isEndlessOn then EL.reset(true) end
 end
 
@@ -3892,6 +3832,8 @@ local lastStatusText = ""
 
 -- Quét trạng thái MỘT ô. Trả về: kind ("u" chưa mở / "n" ô số / nil), changed (trạng thái đổi), stale (ô số quay về chưa mở)
 local function scanPart(part, charPos, now)
+    if SET.junk[part] then return nil, false, false end -- ô rác đã xác nhận: bỏ qua hẳn
+
     if isRangeLimited() and not isWithinActiveRange(part, charPos, SOLVER_CONTEXT_PADDING) then
         clearVisuals(part)
         return nil, false, false
@@ -3901,43 +3843,56 @@ local function scanPart(part, charPos, now)
 
     local kind, changed, stale = nil, false, false
 
-    if isExcluded(part) then
-        if numberTiles[part] or knownSafe[part] or knownMines[part] then
-            numberTiles[part] = nil; knownSafe[part] = nil; knownMines[part] = nil
-            clearVisuals(part)
-            changed = true
-        end
-    elseif isUnrevealed(part) then
-        kind = "u"
-        if numberTiles[part] then
-            -- ô số quay lại trạng thái chưa mở => ván được reset
+    -- Ô số đã biết: chỉ cần kiểm tra NumberGui còn tồn tại (mất NumberGui = ô quay lại chưa mở = ván mới)
+    if numberTiles[part] then
+        if part:FindFirstChild("NumberGui") then
+            kind = "n"
+            if knownSafe[part] then
+                knownSafe[part] = nil
+                clearVisuals(part)
+                changed = true
+            end
+        else
             numberTiles[part] = nil
             checkedNoNumber[part] = nil
+            kind = "u"
             stale = true
             changed = true
         end
-    else
-        if knownSafe[part] then
+        return kind, changed, stale
+    end
+
+    local cls, num = classify(part)
+
+    if cls == "u" then
+        kind = "u"
+        checkedNoNumber[part] = nil
+    elseif cls == "n" then
+        -- ô vừa được mở và đã có số
+        numberTiles[part] = num
+        checkedNoNumber[part] = nil
+        kind = "n"
+        knownSafe[part] = nil
+        clearVisuals(part)
+        changed = true
+    elseif cls == "j" then
+        -- Có NumberGui nhưng TextLabel trống: ô rác. Số có thể chưa kịp hiện nên đọc lại trong ~1.6s rồi coi là rác hẳn.
+        if knownSafe[part] or knownMines[part] then
             knownSafe[part] = nil
+            knownMines[part] = nil
             clearVisuals(part)
             changed = true
         end
-        if numberTiles[part] then
-            kind = "n"
-        else
-            local rec = checkedNoNumber[part]
-            if not rec or (rec.n < 4 and now - rec.t > 0.4) then
-                local num = getNumber(part)
-                if num then
-                    numberTiles[part] = num
-                    checkedNoNumber[part] = nil
-                    kind = "n"
-                    clearVisuals(part)
-                    changed = true
-                else
-                    checkedNoNumber[part] = { n = (rec and rec.n or 0) + 1, t = now }
-                end
+        local rec = checkedNoNumber[part]
+        if not rec then
+            checkedNoNumber[part] = { n = 1, t = now }
+        elseif rec.n < 4 then
+            if now - rec.t > 0.4 then
+                rec.n = rec.n + 1
+                rec.t = now
             end
+        else
+            SET.junk[part] = true
         end
     end
 
@@ -4019,7 +3974,9 @@ local function solverTick()
         local writeIndex = 1
         for readIndex = 1, #cachedParts do
             local part = cachedParts[readIndex]
-            if part and part.Parent then
+            if part and part.Parent and SET.junk[part] then
+                -- ô rác đã xác nhận: bỏ khỏi danh sách quét (vẫn nằm trong cachedSet cho các phép tra cứu khác)
+            elseif part and part.Parent then
                 cachedParts[writeIndex] = part
                 writeIndex = writeIndex + 1
 
