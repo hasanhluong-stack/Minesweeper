@@ -1,4 +1,4 @@
--- V12
+-- V12.5
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -195,7 +195,7 @@ local destroyBtn = createButton("DestroyBtn", "Destroy UI", 8, 146, 184, 20, Col
 -- Link: tiêu đề "Link" ở giữa, bên dưới là URL (hiện rút gọn bằng "..." khi không đủ chỗ) và nút copy.
 -- URL đầy đủ nằm sẵn trong script; nút copy đặt ĐỦ URL vào clipboard.
 do
-    local LINK = "https://scriptblox.com/script/bLockermans-Minesweeper-Auto-open-solution-Remake-Update-237597"
+    local LINK = "https://github.com/hasanhluong-stack/Minesweeper/blob/main/Solver.lua"
 
     local title = Instance.new("TextLabel")
     title.Name = "LinkTitle"
@@ -662,7 +662,7 @@ SET.themes = {
       info = Color3.fromRGB(170, 220, 255), warn = Color3.fromRGB(255, 220, 100), note = Color3.fromRGB(255, 170, 100) },
     -- Windows Standard (kiểu Windows 95/98): nền xám ButtonFace, viền nổi / chìm 2 lớp, thanh tiêu đề gradient navy -> xanh nhạt,
     -- chữ đen font Arial, ô nhập nền trắng chìm.
-    { name = "Windows Standard", light = true, bevel = true, gradient = true, square = true,
+    { name = "Windows Standard", light = true, bevel = true, gradient = true, square = true, led = true,
       font = Enum.Font.Arial, fontBold = Enum.Font.ArialBold,
       panel = Color3.fromRGB(192, 192, 192), title = Color3.fromRGB(0, 0, 128), titleText = Color3.fromRGB(255, 255, 255),
       btn = Color3.fromRGB(192, 192, 192), boxBg = Color3.fromRGB(255, 255, 255), boxText = Color3.fromRGB(0, 0, 0),
@@ -952,6 +952,146 @@ function SET.applyPerf(th)
     end
 end
 
+-- ===== Ô NHẬP SỐ KIỂU LED 7 ĐOẠN (theme Windows Standard) =====
+-- Nền đen, chữ số đỏ rực; các đoạn không sáng vẫn mờ mờ như bảng LED thật. Mỗi ô nhập có 5 chữ số căn phải
+-- (dấu "." gắn vào chữ số đứng trước). TextBox thật vẫn nhận bàn phím, chỉ ẩn chữ đi và vẽ lại giá trị bằng các đoạn LED
+-- theo từng ký tự gõ vào; khi đang gõ có con trỏ đỏ nhấp nháy ở mép phải.
+SET.led = {}
+SET.ledOn = false
+SET.ledCells = 5
+SET.ledPitch = 12
+SET.ledLit = Color3.fromRGB(255, 38, 30)
+SET.ledDim = Color3.fromRGB(62, 8, 8)
+SET.ledSegs = { -- { x, y, rộng, cao } trong một ô chữ số 8x18
+    a = { 2, 0, 4, 2 }, b = { 6, 3, 2, 4 }, c = { 6, 11, 2, 4 }, d = { 2, 16, 4, 2 },
+    e = { 0, 11, 2, 4 }, f = { 0, 3, 2, 4 }, g = { 2, 8, 4, 2 },
+}
+SET.ledPatterns = {
+    ["0"] = "abcdef", ["1"] = "bc", ["2"] = "abdeg", ["3"] = "abcdg", ["4"] = "bcfg",
+    ["5"] = "acdfg", ["6"] = "acdefg", ["7"] = "abc", ["8"] = "abcdefg", ["9"] = "abcdfg", ["-"] = "g",
+}
+
+function SET.ledRender(box)
+    local rec = SET.led[box]
+    if not rec then return end
+
+    -- tách thành ký tự hiển thị: mỗi chữ số / dấu "-" một ô, dấu "." gắn vào ô đứng trước
+    local glyphs = {}
+    for ch in string.gmatch(box.Text, ".") do
+        if ch == "." then
+            if #glyphs == 0 then
+                glyphs[1] = { ch = " ", dp = true }
+            else
+                glyphs[#glyphs].dp = true
+            end
+        elseif ch:match("%d") or ch == "-" then
+            glyphs[#glyphs + 1] = { ch = ch, dp = false }
+        elseif ch ~= " " then
+            glyphs[#glyphs + 1] = { ch = "-", dp = false } -- ký tự lạ: hiện dấu gạch
+        end
+    end
+
+    local n, cellsN = #glyphs, SET.ledCells
+    for i = 1, cellsN do
+        local g = glyphs[n - cellsN + i] -- căn phải
+        local lit = g and SET.ledPatterns[g.ch] or ""
+        local cell = rec.cells[i]
+        for name, seg in pairs(cell.segs) do
+            seg.BackgroundColor3 = (g and string.find(lit, name, 1, true)) and SET.ledLit or SET.ledDim
+        end
+        cell.dp.BackgroundColor3 = (g and g.dp) and SET.ledLit or SET.ledDim
+    end
+end
+
+function SET.buildLed(box)
+    local frame = Instance.new("Frame")
+    frame.Name = "IcoLed"
+    frame.Parent = box
+    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    frame.BorderSizePixel = 0
+    frame.Position = UDim2.new(0, 2, 0, 2) -- chừa 2px cho viền chìm của theme
+    frame.Size = UDim2.new(1, -4, 1, -4)
+    frame.ZIndex = box.ZIndex + 1
+    frame.Visible = false
+
+    local function seg(x, y, w, h)
+        local f = Instance.new("Frame")
+        f.Name = "IcoSeg"
+        f.BorderSizePixel = 0
+        f.BackgroundColor3 = SET.ledDim
+        f.Position = UDim2.new(0, x, 0, y)
+        f.Size = UDim2.new(0, w, 0, h)
+        f.ZIndex = box.ZIndex + 2
+        f.Parent = frame
+        return f
+    end
+
+    local cells = {}
+    for i = 1, SET.ledCells do
+        local x0 = 3 + (i - 1) * SET.ledPitch
+        local cell = { segs = {} }
+        for name, g in pairs(SET.ledSegs) do
+            cell.segs[name] = seg(x0 + g[1], g[2], g[3], g[4])
+        end
+        cell.dp = seg(x0 + 9, 16, 2, 2)
+        cells[i] = cell
+    end
+
+    local cursor = Instance.new("Frame")
+    cursor.Name = "IcoLedCursor"
+    cursor.BorderSizePixel = 0
+    cursor.BackgroundColor3 = SET.ledLit
+    cursor.Position = UDim2.new(0, 3 + SET.ledCells * SET.ledPitch - 1, 0, 0)
+    cursor.Size = UDim2.new(0, 2, 1, 0)
+    cursor.ZIndex = box.ZIndex + 2
+    cursor.Visible = false
+    cursor.Parent = frame
+
+    local rec = { frame = frame, cells = cells, cursor = cursor, focused = false, blinking = false }
+    SET.led[box] = rec
+
+    box:GetPropertyChangedSignal("Text"):Connect(function()
+        if SET.ledOn then SET.ledRender(box) end
+    end)
+
+    box.Focused:Connect(function()
+        rec.focused = true
+        if rec.blinking then return end
+        rec.blinking = true
+        task.spawn(function()
+            while rec.focused and box.Parent do
+                if SET.ledOn then rec.cursor.Visible = not rec.cursor.Visible end
+                task.wait(0.5)
+            end
+            rec.cursor.Visible = false
+            rec.blinking = false
+        end)
+    end)
+
+    box.FocusLost:Connect(function()
+        rec.focused = false
+        rec.cursor.Visible = false
+    end)
+
+    return rec
+end
+
+-- Bật / tắt kiểu LED cho mọi ô nhập số trong menu (tạo các đoạn LED lần đầu khi cần)
+function SET.setLed(on)
+    SET.ledOn = on
+    for _, d in ipairs(mainFrame:GetDescendants()) do
+        if d:IsA("TextBox") then
+            local rec = SET.led[d]
+            if on and not rec then rec = SET.buildLed(d) end
+            if rec then
+                rec.frame.Visible = on
+                d.TextTransparency = on and 1 or 0 -- ẩn chữ thật khi đang vẽ bằng LED
+                if on then SET.ledRender(d) end
+            end
+        end
+    end
+end
+
 -- Tô màu menu theo theme. Đổi NỀN, font, các nhãn trung tính (theo Role) và biểu tượng; chữ ý nghĩa giữ nguyên (xem SET.hookText).
 function SET.applyTheme()
     local th = SET.themes[SET.theme] or SET.themes[1]
@@ -1001,6 +1141,7 @@ function SET.applyTheme()
     if SET.helpPage then SET.helpPage.ScrollBarImageColor3 = scrollColor end
 
     SET.setBevel(th.bevel == true)
+    SET.setLed(th.led == true)
     SET.setAero(th)
 
     local iconColor = th.icon or Color3.fromRGB(255, 255, 255)
@@ -1044,7 +1185,7 @@ function SET.applyTheme()
                 elseif n == "DropItem" then
                     d.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
                 elseif d:IsA("TextBox") then
-                    d.BackgroundColor3 = th.boxBg or th.btn
+                    d.BackgroundColor3 = th.led and Color3.fromRGB(0, 0, 0) or th.boxBg or th.btn
                     d.TextColor3 = th.boxText or white
                 elseif d:IsA("TextButton") or d:IsA("TextLabel") then
                     d.BackgroundColor3 = th.btn
@@ -1585,6 +1726,7 @@ do
         "<b>INTERFACE</b>",
         "- Theme: the black box with an arrow. Tap it to open a scrollable list of themes (Default, Windows Standard, Windows Aero and more). Windows Standard imitates the classic Windows look: grey bevelled buttons, white sunken text boxes, a blue gradient title bar and Arial text. Windows Aero imitates Vista / 7: rounded glass-blue window, glossy buttons, thin steel-blue borders, a shiny gradient title bar with a red X button. For a glass look set Transparency to about 0.15 - 0.25. The small MS button follows the theme too.",
         "- UI scale: size of the menu. Transparency: how see-through it is.",
+        "- In the Windows Standard theme every number box shows its value as a red 7-segment LED display (unlit segments stay faintly visible like on a real LED board). Typing updates it live and a red cursor blinks at the right edge.",
         "- Perf width / height: size of the ms box. You can also drag its + corner.",
         "",
         "<b>ESP</b>",
