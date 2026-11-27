@@ -1,4 +1,4 @@
--- V12.5
+-- V13
 -- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -327,8 +327,8 @@ SET.limits = {
     openDelay = { 0.01, 5, false },
     openBatch = { 1, 60, true },
     actRange = { 10, 300, false },
-    totalMines = { 1, 99999, true },
-    hereThreshold = { 0, 99999, true },
+    totalMines = { 1, 9999, true },
+    hereThreshold = { 0, 9999, true },
     uiScale = { 0.6, 1.4, false },
     alpha = { 0, 0.8, false },
     espStyle = { 1, 3, true },
@@ -518,7 +518,8 @@ local function setCollapsed(c)
     SET.collapsed = c
     if SET.ready then SET.queueSave() end
     applyPages()
-    collapseBtn.Text = c and "+" or "-"
+    collapseBtn.Text = SET.winIconsOn and "" or (c and "+" or "-")
+    if SET.refreshWinCollapse then SET.refreshWinCollapse() end
     titleLabel.Text = c and status.Text or "Minesweeper"
 end
 
@@ -662,7 +663,7 @@ SET.themes = {
       info = Color3.fromRGB(170, 220, 255), warn = Color3.fromRGB(255, 220, 100), note = Color3.fromRGB(255, 170, 100) },
     -- Windows Standard (kiểu Windows 95/98): nền xám ButtonFace, viền nổi / chìm 2 lớp, thanh tiêu đề gradient navy -> xanh nhạt,
     -- chữ đen font Arial, ô nhập nền trắng chìm.
-    { name = "Windows Standard", light = true, bevel = true, gradient = true, square = true, led = true,
+    { name = "Windows Standard", light = true, bevel = true, gradient = true, square = true, led = true, winIcons = true, textScale = 0.92,
       font = Enum.Font.Arial, fontBold = Enum.Font.ArialBold,
       panel = Color3.fromRGB(192, 192, 192), title = Color3.fromRGB(0, 0, 128), titleText = Color3.fromRGB(255, 255, 255),
       btn = Color3.fromRGB(192, 192, 192), boxBg = Color3.fromRGB(255, 255, 255), boxText = Color3.fromRGB(0, 0, 0),
@@ -704,6 +705,7 @@ SET.themes = {
 -- Màu gốc do code đặt luôn được nhớ lại (SET.tc) nên đổi sang theme khác là khôi phục đúng màu.
 SET.tc = setmetatable({}, { __mode = "k" })
 SET.fontOrig = setmetatable({}, { __mode = "k" })
+SET.sizeOrig = setmetatable({}, { __mode = "k" })
 SET.winLight = false
 SET.adjusting = false
 
@@ -913,6 +915,11 @@ function SET.refreshIcon()
     if raised then for _, f in ipairs(raised) do f.Visible = on and not visible end end
     if sunk then for _, f in ipairs(sunk) do f.Visible = on and visible end end
 
+    -- quả mìn trên nút MS (Windows Standard) lún xuống 1px khi menu đang mở
+    if SET.wi and SET.wi.mineBig then
+        SET.wi.mineBig.Position = (th.winIcons and visible) and UDim2.new(0.5, 1, 0.5, 1) or UDim2.new(0.5, 0, 0.5, 0)
+    end
+
     local ae = SET.aeroList[iconBtn]
     if ae and th.aero then
         ae.stroke.Color = visible and (th.iconActive or Color3.fromRGB(0, 120, 230)) or (th.edge or Color3.fromRGB(70, 110, 160))
@@ -953,18 +960,19 @@ function SET.applyPerf(th)
 end
 
 -- ===== Ô NHẬP SỐ KIỂU LED 7 ĐOẠN (theme Windows Standard) =====
--- Nền đen, chữ số đỏ rực; các đoạn không sáng vẫn mờ mờ như bảng LED thật. Mỗi ô nhập có 5 chữ số căn phải
--- (dấu "." gắn vào chữ số đứng trước). TextBox thật vẫn nhận bàn phím, chỉ ẩn chữ đi và vẽ lại giá trị bằng các đoạn LED
--- theo từng ký tự gõ vào; khi đang gõ có con trỏ đỏ nhấp nháy ở mép phải.
+-- Dễ nhìn hơn: ô nhập được phóng to (84x24), 4 chữ số LỚN (16x20, nét dày 2-3px) màu đỏ rực trên nền đen; các đoạn
+-- không sáng vẫn mờ mờ như bảng LED thật. Chữ số căn phải, dấu "." là chấm LED gắn vào chữ số đứng trước.
+-- TextBox thật vẫn nhận bàn phím (chỉ ẩn chữ), giá trị được vẽ lại theo từng ký tự gõ vào; khi đang gõ có con trỏ đỏ nhấp nháy.
 SET.led = {}
 SET.ledOn = false
-SET.ledCells = 5
-SET.ledPitch = 12
-SET.ledLit = Color3.fromRGB(255, 38, 30)
-SET.ledDim = Color3.fromRGB(62, 8, 8)
-SET.ledSegs = { -- { x, y, rộng, cao } trong một ô chữ số 8x18
-    a = { 2, 0, 4, 2 }, b = { 6, 3, 2, 4 }, c = { 6, 11, 2, 4 }, d = { 2, 16, 4, 2 },
-    e = { 0, 11, 2, 4 }, f = { 0, 3, 2, 4 }, g = { 2, 8, 4, 2 },
+SET.ledCells = 4
+SET.ledPitch = 20
+SET.boxGeom = setmetatable({}, { __mode = "k" }) -- kích thước / vị trí gốc của các ô nhập
+SET.ledLit = Color3.fromRGB(255, 52, 36)
+SET.ledDim = Color3.fromRGB(74, 10, 10)
+SET.ledSegs = { -- { x, y, rộng, cao } trong một chữ số 16x20
+    a = { 4, 0, 8, 2 }, b = { 13, 3, 3, 5 }, c = { 13, 12, 3, 5 }, d = { 4, 18, 8, 2 },
+    e = { 0, 12, 3, 5 }, f = { 0, 3, 3, 5 }, g = { 4, 9, 8, 2 },
 }
 SET.ledPatterns = {
     ["0"] = "abcdef", ["1"] = "bc", ["2"] = "abdeg", ["3"] = "abcdg", ["4"] = "bcfg",
@@ -1028,12 +1036,12 @@ function SET.buildLed(box)
 
     local cells = {}
     for i = 1, SET.ledCells do
-        local x0 = 3 + (i - 1) * SET.ledPitch
+        local x0 = (i - 1) * SET.ledPitch
         local cell = { segs = {} }
         for name, g in pairs(SET.ledSegs) do
             cell.segs[name] = seg(x0 + g[1], g[2], g[3], g[4])
         end
-        cell.dp = seg(x0 + 9, 16, 2, 2)
+        cell.dp = seg(x0 + 17, 17, 3, 3)
         cells[i] = cell
     end
 
@@ -1041,8 +1049,8 @@ function SET.buildLed(box)
     cursor.Name = "IcoLedCursor"
     cursor.BorderSizePixel = 0
     cursor.BackgroundColor3 = SET.ledLit
-    cursor.Position = UDim2.new(0, 3 + SET.ledCells * SET.ledPitch - 1, 0, 0)
-    cursor.Size = UDim2.new(0, 2, 1, 0)
+    cursor.Position = UDim2.new(1, -3, 0, 0)
+    cursor.Size = UDim2.new(0, 3, 1, 0)
     cursor.ZIndex = box.ZIndex + 2
     cursor.Visible = false
     cursor.Parent = frame
@@ -1076,7 +1084,7 @@ function SET.buildLed(box)
     return rec
 end
 
--- Bật / tắt kiểu LED cho mọi ô nhập số trong menu (tạo các đoạn LED lần đầu khi cần)
+-- Bật / tắt kiểu LED cho mọi ô nhập số (tạo các đoạn LED lần đầu khi cần); ô nhập được phóng to khi LED bật
 function SET.setLed(on)
     SET.ledOn = on
     for _, d in ipairs(mainFrame:GetDescendants()) do
@@ -1088,8 +1096,259 @@ function SET.setLed(on)
                 d.TextTransparency = on and 1 or 0 -- ẩn chữ thật khi đang vẽ bằng LED
                 if on then SET.ledRender(d) end
             end
+
+            local g = SET.boxGeom[d]
+            if on then
+                if not g then
+                    g = { pos = d.Position, size = d.Size }
+                    SET.boxGeom[d] = g
+                end
+                d.Position = UDim2.new(0, 108, 0, g.pos.Y.Offset - 1)
+                d.Size = UDim2.new(0, 84, 0, 24)
+            elseif g then
+                d.Position = g.pos
+                d.Size = g.size
+            end
         end
     end
+end
+
+-- ===== BIỂU TƯỢNG KIỂU WINDOWS CỔ ĐIỂN (theme Windows Standard) =====
+-- Thu nhỏ = thanh đen sát đáy, phóng to = ô vuông viền trên dày, đóng = chữ X, trợ giúp = dấu "?", cài đặt = bánh răng,
+-- nút MS = quả MÌN của Minesweeper (lún xuống khi menu đang mở), biểu tượng mìn nhỏ ở góc thanh tiêu đề,
+-- mũi tên combo = tam giác đen trên nút xám nổi, tay nắm đổi kích thước = các chấm chéo, copy = hai tờ giấy có dòng kẻ.
+-- Các biểu tượng chỉ được vẽ lần đầu khi chọn Windows Standard; theme khác ẩn chúng đi và trả lại ký tự gốc.
+SET.wi = { built = false }
+SET.winIconsOn = false
+
+function SET.buildWinIcons()
+    local wi = SET.wi
+    if wi.built then return end
+    wi.built = true
+    local black = Color3.fromRGB(0, 0, 0)
+
+    local function container(parent, w, h, name)
+        local f = Instance.new("Frame")
+        f.Name = name or "IcoWin"
+        f.BackgroundTransparency = 1
+        f.BorderSizePixel = 0
+        f.AnchorPoint = Vector2.new(0.5, 0.5)
+        f.Position = UDim2.new(0.5, 0, 0.5, 0)
+        f.Size = UDim2.new(0, w, 0, h)
+        f.ZIndex = parent.ZIndex + 2
+        f.Visible = false
+        f.Parent = parent
+        return f
+    end
+
+    local function rect(parent, x, y, w, h, color)
+        local f = Instance.new("Frame")
+        f.Name = "IcoWinPart"
+        f.BorderSizePixel = 0
+        f.BackgroundColor3 = color or black
+        f.Position = UDim2.new(0, x, 0, y)
+        f.Size = UDim2.new(0, w, 0, h)
+        f.ZIndex = parent.ZIndex
+        f.Parent = parent
+        return f
+    end
+
+    local function bar(parent, cx, cy, len, thick, rot, color) -- thanh xoay quanh tâm (cx, cy)
+        local f = rect(parent, cx, cy, len, thick, color)
+        f.AnchorPoint = Vector2.new(0.5, 0.5)
+        f.Rotation = rot
+        return f
+    end
+
+    local function circle(parent, x, y, d, color)
+        local f = rect(parent, x, y, d, d, color)
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(1, 0)
+        c.Parent = f
+        return f
+    end
+
+    -- Thu nhỏ: thanh đen ngắn sát đáy
+    wi.minimize = container(collapseBtn, 16, 14)
+    rect(wi.minimize, 3, 9, 7, 2)
+
+    -- Phóng to (khi menu đang thu gọn): ô vuông có viền trên dày
+    wi.maximize = container(collapseBtn, 16, 14)
+    rect(wi.maximize, 3, 2, 10, 2)
+    rect(wi.maximize, 3, 2, 1, 9)
+    rect(wi.maximize, 12, 2, 1, 9)
+    rect(wi.maximize, 3, 10, 10, 1)
+
+    -- Đóng: chữ X bằng hai thanh chéo 2px
+    wi.close = container(closeBtn, 16, 14)
+    bar(wi.close, 8, 7, 12, 2, 45)
+    bar(wi.close, 8, 7, 12, 2, -45)
+
+    -- Cài đặt: bánh răng 8 răng (4 thanh xoay) + thân tròn + lỗ giữa (màu nền nút)
+    wi.gear = container(gearBtn, 16, 16)
+    for _, rot in ipairs({ 0, 45, 90, 135 }) do bar(wi.gear, 8, 8, 15, 3, rot) end
+    circle(wi.gear, 3, 3, 10)
+    wi.gearHole = circle(wi.gear, 6, 6, 4, Color3.fromRGB(192, 192, 192))
+
+    -- Quả mìn cổ điển: thân tròn đen, 8 gai, chấm sáng
+    local function mine(parent, size, name)
+        local m = container(parent, size, size, name)
+        local thick = math.max(2, math.floor(size / 10))
+        for _, rot in ipairs({ 0, 45, 90, 135 }) do bar(m, size / 2, size / 2, size, thick, rot) end
+        local d = math.floor(size * 0.6)
+        local o = math.floor((size - d) / 2)
+        circle(m, o, o, d)
+        local sh = math.max(2, math.floor(d * 0.25))
+        local so = o + math.floor(d * 0.2)
+        rect(m, so, so, sh, sh, Color3.fromRGB(255, 255, 255))
+        return m
+    end
+    wi.mineBig = mine(iconBtn, 24)
+    wi.mineSmall = mine(titleBar, 16, "IcoMineSmall")
+    wi.mineSmall.Position = UDim2.new(0, 16, 0.5, 0)
+
+    -- Tay nắm đổi kích thước của khung ms: các chấm xám có bóng trắng xếp tam giác
+    local grip = SET.msGrip
+    if grip then
+        wi.grip = container(grip, 16, 16)
+        for _, pt in ipairs({ { 12, 12 }, { 8, 12 }, { 12, 8 }, { 4, 12 }, { 8, 8 }, { 12, 4 } }) do
+            rect(wi.grip, pt[1] + 1, pt[2] + 1, 2, 2, Color3.fromRGB(255, 255, 255))
+            rect(wi.grip, pt[1], pt[2], 2, 2, Color3.fromRGB(128, 128, 128))
+        end
+    end
+
+    -- Ô chọn theme: nút xám NỔI chứa tam giác đen (tam giác xoay cùng dấu mũ khi mở / đóng)
+    local dropBox, caret = SET.dropBox, SET.dropCaret
+    if dropBox and caret then
+        local cb = Instance.new("Frame")
+        cb.Name = "IcoCaretBtn"
+        cb.BorderSizePixel = 0
+        cb.BackgroundColor3 = Color3.fromRGB(192, 192, 192)
+        cb.Position = UDim2.new(1, -19, 0, 2)
+        cb.Size = UDim2.new(0, 17, 0, 18)
+        cb.ZIndex = dropBox.ZIndex + 1
+        cb.Visible = false
+        cb.Parent = dropBox
+        SET.addBevel(cb, false)
+        wi.caretBtn = cb
+
+        wi.tri = {}
+        for i, w in ipairs({ 8, 6, 4, 2 }) do
+            local t = rect(caret, 3 + i, 5 + i, w, 1)
+            t.Name = "IcoTri"
+            t.ZIndex = caret.ZIndex + 1
+            t.Visible = false
+            wi.tri[i] = t
+        end
+    end
+end
+
+function SET.applyWinIcons(th)
+    local win = th.winIcons == true
+    SET.winIconsOn = win
+    if win then SET.buildWinIcons() end
+    local wi = SET.wi
+    if not wi.built then return end
+
+    local black, white = Color3.fromRGB(0, 0, 0), Color3.fromRGB(255, 255, 255)
+
+    -- Chữ trên các nút nhỏ: Windows dùng biểu tượng vẽ, theme khác dùng ký tự gốc
+    collapseBtn.Text = win and "" or (SET.collapsed and "+" or "-")
+    gearBtn.Text = win and "" or "⚙"
+    closeBtn.Text = win and "" or "X"
+    helpBtn.Text = win and "?" or ""
+    iconBtn.Text = win and "" or "MS"
+    if SET.msGrip then SET.msGrip.Text = win and "" or "+" end
+
+    for _, ch in ipairs(helpBtn:GetChildren()) do
+        if ch.Name == "IcoPage" then ch.Visible = not win end -- quyển sách chỉ dùng cho theme khác
+    end
+
+    wi.minimize.Visible = win and not SET.collapsed
+    wi.maximize.Visible = win and SET.collapsed == true
+    wi.close.Visible = win
+    wi.gear.Visible = win
+    wi.gearHole.BackgroundColor3 = th.btn
+    wi.mineBig.Visible = win
+    wi.mineSmall.Visible = win
+    if wi.grip then wi.grip.Visible = win end
+
+    if wi.caretBtn and SET.dropCaret then
+        wi.caretBtn.Visible = win
+        for _, t in ipairs(wi.tri) do t.Visible = win end
+        for _, ch in ipairs(SET.dropCaret:GetChildren()) do
+            if ch.Name == "IcoBar" then ch.Visible = not win end
+        end
+        SET.dropCaret.Position = win and UDim2.new(1, -11, 0.5, 0) or UDim2.new(1, -16, 0.5, 0)
+    end
+
+    -- Tiêu đề: chừa chỗ cho biểu tượng mìn nhỏ ở bên trái
+    if not SET.titleOrig then
+        SET.titleOrig = { pos = titleLabel.Position, size = titleLabel.Size }
+    end
+    if win then
+        titleLabel.Position = UDim2.new(0, 28, 0, 0)
+        titleLabel.Size = UDim2.new(1, -152, 1, 0)
+    else
+        titleLabel.Position = SET.titleOrig.pos
+        titleLabel.Size = SET.titleOrig.size
+    end
+
+    -- Biểu tượng copy: Windows = hai tờ giấy trắng viền đen, tờ trước có dòng kẻ
+    local copyBtn = body:FindFirstChild("LinkCopy")
+    if copyBtn then
+        local back = copyBtn:FindFirstChild("IcoCopyBack")
+        local front = copyBtn:FindFirstChild("IcoCopyFront")
+        local stroke = back and back:FindFirstChild("IcoStroke")
+        if back and front and stroke then
+            if win then
+                if not wi.copyLines then
+                    local s2 = Instance.new("UIStroke")
+                    s2.Name = "IcoStroke2"
+                    s2.Thickness = 1
+                    s2.Color = black
+                    s2.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                    s2.Parent = front
+                    wi.copyStroke2 = s2
+
+                    wi.copyLines = {}
+                    for i = 1, 3 do
+                        local ln = Instance.new("Frame")
+                        ln.Name = "IcoCopyLine"
+                        ln.BorderSizePixel = 0
+                        ln.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
+                        ln.Position = UDim2.new(0, 2, 0, 1 + i * 3)
+                        ln.Size = UDim2.new(0, 5, 0, 1)
+                        ln.ZIndex = front.ZIndex + 1
+                        ln.Parent = front
+                        wi.copyLines[i] = ln
+                    end
+                end
+                back.BackgroundTransparency = 0
+                back.BackgroundColor3 = white
+                stroke.Color = black
+                stroke.Thickness = 1
+                front.BackgroundColor3 = white
+                wi.copyStroke2.Enabled = true
+                for _, ln in ipairs(wi.copyLines) do ln.Visible = true end
+            else
+                back.BackgroundTransparency = 1
+                stroke.Thickness = 1.5
+                if wi.copyStroke2 then wi.copyStroke2.Enabled = false end
+                if wi.copyLines then
+                    for _, ln in ipairs(wi.copyLines) do ln.Visible = false end
+                end
+            end
+        end
+    end
+end
+
+-- Menu đổi thu gọn <-> mở rộng: đổi biểu tượng thu nhỏ / phóng to của Windows
+function SET.refreshWinCollapse()
+    local wi = SET.wi
+    if not wi.built or not SET.winIconsOn then return end
+    wi.minimize.Visible = not SET.collapsed
+    wi.maximize.Visible = SET.collapsed == true
 end
 
 -- Tô màu menu theo theme. Đổi NỀN, font, các nhãn trung tính (theo Role) và biểu tượng; chữ ý nghĩa giữ nguyên (xem SET.hookText).
@@ -1160,17 +1419,28 @@ function SET.applyTheme()
             local isDrop = n:sub(1, 4) == "Drop"
 
             -- Font (Windows Standard dùng Arial, Aero dùng SourceSans; theme khác trả về font gốc)
-            if isText and not isDrop then
+            if isText then
                 local orig = SET.fontOrig[d]
                 if not orig then
                     orig = d.Font
                     SET.fontOrig[d] = orig
+                    SET.sizeOrig[d] = d.TextSize
                 end
                 if th.font then
-                    local bold = orig == Enum.Font.GothamBold or orig == Enum.Font.SourceSansBold or orig == Enum.Font.ArialBold
-                    d.Font = bold and th.fontBold or th.font
+                    if th.winIcons then
+                        -- Windows cổ điển: nút / nhãn dùng chữ THƯỜNG; chỉ thanh tiêu đề và nút "?" in đậm
+                        d.Font = (d == titleLabel or d == helpBtn) and th.fontBold or th.font
+                    else
+                        local bold = orig == Enum.Font.GothamBold or orig == Enum.Font.SourceSansBold or orig == Enum.Font.ArialBold
+                        d.Font = bold and th.fontBold or th.font
+                    end
                 else
                     d.Font = orig
+                end
+                -- Cỡ chữ: Windows cổ điển dùng chữ nhỏ (MS Sans Serif 8pt ~ 11px)
+                if not d.TextScaled then
+                    local base = SET.sizeOrig[d]
+                    d.TextSize = th.textScale and math.max(10, math.floor(base * th.textScale + 0.5)) or base
                 end
             end
 
@@ -1216,6 +1486,7 @@ function SET.applyTheme()
     if SET.refreshTitleIcons then SET.refreshTitleIcons() end
     SET.refreshIcon()
     SET.applyPerf(th)
+    SET.applyWinIcons(th)
 end
 
 function SET.applyAll()
@@ -1409,6 +1680,9 @@ do
         bar.BorderSizePixel = 0
         bar.ZIndex = 7
     end
+
+    SET.dropBox = dropBox
+    SET.dropCaret = caret
 
     local dropList = Instance.new("ScrollingFrame")
     dropList.Name = "DropList"
@@ -1726,7 +2000,8 @@ do
         "<b>INTERFACE</b>",
         "- Theme: the black box with an arrow. Tap it to open a scrollable list of themes (Default, Windows Standard, Windows Aero and more). Windows Standard imitates the classic Windows look: grey bevelled buttons, white sunken text boxes, a blue gradient title bar and Arial text. Windows Aero imitates Vista / 7: rounded glass-blue window, glossy buttons, thin steel-blue borders, a shiny gradient title bar with a red X button. For a glass look set Transparency to about 0.15 - 0.25. The small MS button follows the theme too.",
         "- UI scale: size of the menu. Transparency: how see-through it is.",
-        "- In the Windows Standard theme every number box shows its value as a red 7-segment LED display (unlit segments stay faintly visible like on a real LED board). Typing updates it live and a red cursor blinks at the right edge.",
+        "- In the Windows Standard theme every number box becomes a bigger black panel with four large red 7-segment LED digits (unlit segments stay faintly visible like on a real LED board). Typing updates it live and a red cursor blinks at the right edge. Total mines and Here at mines accept up to 4 digits.",
+        "- Windows Standard also redraws the small icons the classic way: minimize / maximize / close buttons, a ? help button, a gear for Settings, the Minesweeper mine on the MS button and in the title bar, a raised combo arrow, a resize grip and a paper-sheet copy icon. The font is Arial in regular weight (only the title bar is bold) because Roblox has no MS Sans Serif.",
         "- Perf width / height: size of the ms box. You can also drag its + corner.",
         "",
         "<b>ESP</b>",
